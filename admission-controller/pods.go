@@ -34,7 +34,7 @@ const (
 )
 
 var podsInitContainerPatch string = `[
-                 {"op":"add","path":"/spec/initContainers","value":[{"image":"%v","name":"secrets-init-container","volumeMounts":[{"name":"secret-vol","mountPath":"/tmp"}],"env":[{"name": "SECRET_ARN","valueFrom": {"fieldRef": {"fieldPath": "metadata.annotations['secrets.k8s.aws/secret-arn']"}}}],"resources":{}}]},{"op":"add","path":"/spec/volumes/-","value":{"emptyDir": {"medium": "Memory"},"name": "secret-vol"}}`
+                 {"op":"add","path":"/spec/initContainers","value":[{"image":"%v","name":"secrets-init-container","volumeMounts":[{"name":"secret-vol","mountPath":"/tmp"}],"env":[{"name": "HTTPS_PROXY","valueFrom": {"fieldRef": {"fieldPath": "metadata.annotations['secrets.k8s.aws/https-proxy']"}}},{"name": "SECRET_ARN","valueFrom": {"fieldRef": {"fieldPath": "metadata.annotations['secrets.k8s.aws/secret-arn']"}}}],"resources":{}}]},{"op":"add","path":"/spec/volumes/-","value":{"emptyDir": {"medium": "Memory"},"name": "secret-vol"}}`
 
 // only allow pods to pull images from specific registry.
 func admitPods(ar v1.AdmissionReview) *v1.AdmissionResponse {

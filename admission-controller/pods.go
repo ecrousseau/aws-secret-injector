@@ -17,181 +17,166 @@ limitations under the License.
 package main
 
 import (
-	"fmt"
-	"strings"
-        "strconv"
-
-	"k8s.io/api/admission/v1"
-	corev1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/klog"
+    "fmt"
+    "k8s.io/api/admission/v1"
+    corev1 "k8s.io/api/core/v1"
+    metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+    "k8s.io/klog"
+    "encoding/json"
 )
 
-const (
-	podsSidecarPatch string = `[
-		{"op":"add", "path":"/spec/containers/-","value":{"image":"%v","name":"webhook-added-sidecar","volumeMounts":[{"name":"vol","mountPath":"/tmp"}],"resources":{}}}
-	]` 
-)
-
-var podsInitContainerPatch string = `[
-                 {"op":"add","path":"/spec/initContainers","value":[{"image":"%v","name":"secrets-init-container","volumeMounts":[{"name":"secret-vol","mountPath":"/tmp"}],"env":[{"name": "HTTPS_PROXY","valueFrom": {"fieldRef": {"fieldPath": "metadata.annotations['secrets.k8s.aws/https-proxy']"}}},{"name": "SECRET_ARN","valueFrom": {"fieldRef": {"fieldPath": "metadata.annotations['secrets.k8s.aws/secret-arn']"}}}],"resources":{}}]},{"op":"add","path":"/spec/volumes/-","value":{"emptyDir": {"medium": "Memory"},"name": "secret-vol"}}`
-
-// only allow pods to pull images from specific registry.
-func admitPods(ar v1.AdmissionReview) *v1.AdmissionResponse {
-	klog.V(2).Info("admitting pods")
-	podResource := metav1.GroupVersionResource{Group: "", Version: "v1", Resource: "pods"}
-	if ar.Request.Resource != podResource {
-		err := fmt.Errorf("expect resource to be %s", podResource)
-		klog.Error(err)
-		return toV1AdmissionResponse(err)
-	}
-
-	raw := ar.Request.Object.Raw
-	pod := corev1.Pod{}
-	deserializer := codecs.UniversalDeserializer()
-	if _, _, err := deserializer.Decode(raw, nil, &pod); err != nil {
-		klog.Error(err)
-		return toV1AdmissionResponse(err)
-	}
-	reviewResponse := v1.AdmissionResponse{}
-	reviewResponse.Allowed = true
-
-	var msg string
-	if v, ok := pod.Labels["webhook-e2e-test"]; ok {
-		if v == "webhook-disallow" {
-			reviewResponse.Allowed = false
-			msg = msg + "the pod contains unwanted label; "
-		}
-		if v == "wait-forever" {
-			reviewResponse.Allowed = false
-			msg = msg + "the pod response should not be sent; "
-			<-make(chan int) // Sleep forever - no one sends to this channel
-		}
-	}
-	for _, container := range pod.Spec.Containers {
-		if strings.Contains(container.Name, "webhook-disallow") {
-			reviewResponse.Allowed = false
-			msg = msg + "the pod contains unwanted container name; "
-		}
-	}
-	if !reviewResponse.Allowed {
-		reviewResponse.Result = &metav1.Status{Message: strings.TrimSpace(msg)}
-	}
-	return &reviewResponse
-}
-
-func mutatePods(ar v1.AdmissionReview) *v1.AdmissionResponse {
-	shouldPatchPod := func(pod *corev1.Pod) bool {
-               inject_status, _ :=  pod.ObjectMeta.Annotations["secrets.k8s.aws/sidecarInjectorWebhook"]
-               if inject_status != "enabled" {
-                   return false
-               }
-               _, arn_ok :=  pod.ObjectMeta.Annotations["secrets.k8s.aws/secret-arn"]
-               if arn_ok == false {
-                  return false
-               }
-               return !hasContainer(pod.Spec.InitContainers, "secrets-init-container")
+const init_container_patch string = `[
+    {
+        "op":"add",
+        "path":"/spec/initContainers",
+        "value":[
+            {
+                "image":"%v",
+                "name":"secrets-init-container",
+                "volumeMounts":[
+                    {
+                        "name":"secret-vol",
+                        "mountPath":"/injected-secrets"
+                    }
+                ],
+                "env":[
+                    {
+                        "name": "SECRET_ARNS",
+                        "valueFrom": {
+                            "fieldRef": {
+                                "fieldPath": "metadata.annotations['secrets.aws.k8s/secretArns']"
+                            }
+                        }
+                    },
+                    {
+                        "name": "HTTPS_PROXY",
+                        "valueFrom": {
+                            "configMapKeyRef": {
+                                "name": "proxy-settings",
+                                "key": "HTTPS_PROXY",
+                                "optional": true
+                            }
+                        }
+                    },
+                    {
+                        "name": "NO_PROXY",
+                        "valueFrom": {
+                            "configMapKeyRef": {
+                                "name": "proxy-settings",
+                                "key": "NO_PROXY",
+                                "optional": true
+                            }
+                        }
+                    }
+                ],
+                "resources":{
+                    "requests":{
+                        "cpu": "100m",
+                        "memory": "256Mi"
+                    },
+                    "limits":{
+                        "cpu": "100m",
+                        "memory": "256Mi"
+                    }
+                }
+            }
+        ]
+    },
+    {
+        "op":"add",
+        "path":"/spec/volumes/-",
+        "value":{
+            "emptyDir": {
+                "medium": "Memory"
+            },
+            "name": "secret-vol"
         }
-	return applyPodPatch(ar, shouldPatchPod, fmt.Sprintf(podsInitContainerPatch, sidecarImage))
+    }
+]`
+
+type VolumeMount struct {
+    Name string `json:"name"`
+    MountPath string `json:"mountPath"`
 }
 
-func mutatePodsSidecar(ar v1.AdmissionReview) *v1.AdmissionResponse {
-	if sidecarImage == "" {
-		return &v1.AdmissionResponse{
-			Allowed: false,
-			Result: &metav1.Status{
-				Status:  "Failure",
-				Message: "No image specified by the sidecar-image parameter",
-				Code:    500,
-			},
-		}
-	}
-	shouldPatchPod := func(pod *corev1.Pod) bool {
-		return !hasContainer(pod.Spec.Containers, "webhook-added-sidecar")
-	}
-	return applyPodPatch(ar, shouldPatchPod, fmt.Sprintf(podsSidecarPatch, sidecarImage))
+type Patch struct {
+    Op string `json:"op"`
+    Path string `json:"path"`
+    Value interface{} `json:"value"`
 }
 
 func hasContainer(containers []corev1.Container, containerName string) bool {
-	for _, container := range containers {
-		if container.Name == containerName {
-			return true
-		}
-	}
-	return false
+    for _, container := range containers {
+        if container.Name == containerName {
+            return true
+        }
+    }
+    return false
 }
 
+func mutatePods(ar v1.AdmissionReview) *v1.AdmissionResponse {
+    klog.V(2).Info("mutating pods")
+    podResource := metav1.GroupVersionResource{Group: "", Version: "v1", Resource: "pods"}
+    if ar.Request.Resource != podResource {
+        klog.Errorf("expect resource to be %s", podResource)
+        return nil
+    }
+    /* deserialize the raw request into a pod object */
+    raw := ar.Request.Object.Raw
+    pod := corev1.Pod{}
+    deserializer := codecs.UniversalDeserializer()
+    if _, _, err := deserializer.Decode(raw, nil, &pod); err != nil {
+        klog.Error(err)
+        return toV1AdmissionResponse(err)
+    } else {
+        klog.Info("Pod spec:", pod)
+    }
 
-func applyPodPatch(ar v1.AdmissionReview, shouldPatchPod func(*corev1.Pod) bool, patch string) *v1.AdmissionResponse {
-	klog.V(2).Info("mutating pods")
-	podResource := metav1.GroupVersionResource{Group: "", Version: "v1", Resource: "pods"}
-	if ar.Request.Resource != podResource {
-		klog.Errorf("expect resource to be %s", podResource)
-		return nil
-	}
-	raw := ar.Request.Object.Raw
-	pod := corev1.Pod{}
-	deserializer := codecs.UniversalDeserializer()
-	if _, _, err := deserializer.Decode(raw, nil, &pod); err != nil {
-		klog.Error(err)
-		return toV1AdmissionResponse(err)
-	}
-	reviewResponse := v1.AdmissionResponse{}
-	reviewResponse.Allowed = true
-	if shouldPatchPod(&pod) {
-                var path = "{\"op\": \"add\",\"path\": \"/spec/containers/" 
-                var value = "/volumeMounts/-\",\"value\": {\"mountPath\": \"/tmp/\",\"name\": \"secret-vol\"}}"
-                var vol_mounts = ""
-                for i, _ := range pod.Spec.Containers {
-                    if i == 0  {
-                        vol_mounts = path + strconv.Itoa(i) + value
-                        } else {
-                        vol_mounts = vol_mounts + "," + path + strconv.Itoa(i) + value
-                    }
-                }
-                patch = patch + "," + vol_mounts + "]"
-		reviewResponse.Patch = []byte(patch)
-		pt := v1.PatchTypeJSONPatch
-		reviewResponse.PatchType = &pt
-	}
-        klog.Info(&reviewResponse)
-	return &reviewResponse
-}
+    /* prepare the response */
+    reviewResponse := v1.AdmissionResponse{}
+    reviewResponse.Allowed = true
 
-// denySpecificAttachment denies `kubectl attach to-be-attached-pod -i -c=container1"
-// or equivalent client requests.
-func denySpecificAttachment(ar v1.AdmissionReview) *v1.AdmissionResponse {
-	klog.V(2).Info("handling attaching pods")
-	if ar.Request.Name != "to-be-attached-pod" {
-		return &v1.AdmissionResponse{Allowed: true}
-	}
-	podResource := metav1.GroupVersionResource{Group: "", Version: "v1", Resource: "pods"}
-	if e, a := podResource, ar.Request.Resource; e != a {
-		err := fmt.Errorf("expect resource to be %s, got %s", e, a)
-		klog.Error(err)
-		return toV1AdmissionResponse(err)
-	}
-	if e, a := "attach", ar.Request.SubResource; e != a {
-		err := fmt.Errorf("expect subresource to be %s, got %s", e, a)
-		klog.Error(err)
-		return toV1AdmissionResponse(err)
-	}
+    /* examine the injectorWebhook annotation */
+    klog.Info("Pod annotations:", pod.ObjectMeta.Annotations)
+    annotation_injector_webhook, ok := pod.ObjectMeta.Annotations["secrets.aws.k8s/injectorWebhook"]
+    if !ok { 
+        klog.Info("Pod annotation secrets.aws.k8s/injectorWebhook not set - no action required")
+        return &reviewResponse
+    }
+    klog.Info("Pod annotation secrets.aws.k8s/injectorWebhook is set to %s", annotation_injector_webhook)
 
-	raw := ar.Request.Object.Raw
-	podAttachOptions := corev1.PodAttachOptions{}
-	deserializer := codecs.UniversalDeserializer()
-	if _, _, err := deserializer.Decode(raw, nil, &podAttachOptions); err != nil {
-		klog.Error(err)
-		return toV1AdmissionResponse(err)
-	}
-	klog.V(2).Info(fmt.Sprintf("podAttachOptions=%#v\n", podAttachOptions))
-	if !podAttachOptions.Stdin || podAttachOptions.Container != "container1" {
-		return &v1.AdmissionResponse{Allowed: true}
-	}
-	return &v1.AdmissionResponse{
-		Allowed: false,
-		Result: &metav1.Status{
-			Message: "attaching to pod 'to-be-attached-pod' is not allowed",
-		},
-	}
+    /* decide how to patch the pod */
+    /* TODO add sidecar option */
+    if annotation_injector_webhook == "init-container" {
+        klog.Info("Injecting init container")
+        if hasContainer(pod.Spec.InitContainers, "secrets-init-container") {
+            klog.Error("Pod already has an init-container named secrets-init-container")
+            return nil
+        }
+
+        /* read the JSON string */
+        var patches []Patch
+        json.Unmarshal([]byte(fmt.Sprintf(init_container_patch, sidecarImage)), &patches)
+    
+        /* add patches for each container */
+        v := VolumeMount{"secret-vol", "/injected-secrets"}
+        for i := range pod.Spec.Containers {
+            patch := Patch{"add", fmt.Sprintf("/spec/containers/%d/volumeMounts/-", i), v}
+            patches = append(patches, patch)
+        }
+        
+        /* reconstruct the JSON string */    
+        b, err := json.Marshal(patches)
+        if err != nil {
+            fmt.Printf(err.Error())
+        }
+        reviewResponse.Patch = b
+        pt := v1.PatchTypeJSONPatch
+        reviewResponse.PatchType = &pt
+        klog.Info("Patch: ", string(b))
+    }
+
+    /* log and send the response */
+    klog.Info(reviewResponse.String())
+    return &reviewResponse
 }

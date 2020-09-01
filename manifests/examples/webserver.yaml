@@ -1,0 +1,23 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app: secrets-testing
+  name: secrets-testing
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: secrets-testing
+  template:
+    metadata:
+      annotations:
+        secrets.aws.k8s/injectorWebhook: init-container
+        secrets.aws.k8s/secretArns: arn:aws:secretsmanager:us-east-1:123456789012:secret:database-password-hlRvvF,arn:aws:secretsmanager:us-east-1:123456789012:secret:database-password-hlRvvG
+      labels:
+        app: secrets-testing
+    spec:
+      containers:
+      - image: busybox:1.28
+        name: busybox
+        command: ['sh', '-c', 'echo $(ls /injected-secrets/ && cat /injected-secrets/*) && sleep 3600']

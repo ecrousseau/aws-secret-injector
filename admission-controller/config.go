@@ -18,7 +18,6 @@ package main
 
 import (
 	"crypto/tls"
-
 	"k8s.io/klog"
 )
 

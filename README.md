@@ -1,44 +1,31 @@
-# AWS Secret Sidecar Injector
+# AWS Secret Injector
 
-The _aws-secret-sidecar-injector_ is a proof-of-concept(PoC) that allows your containerized applications to consume secrets from AWS Secrets Manager. The solution makes use of a Kubernetes dynamic admission controller that injects an _init_ container, aws-secrets-manager-secret-sidecar, upon creation/update of your pod. The init container relies on [IRSA](https://docs.aws.amazon.com/eks/latest/userguide/iam-roles-for-service-accounts.html) to retrieve the secret from AWS Secrets Manager. The Kubernetes dynamic admission controller also creates an in-memory Kubernetes volume (with name `secret-vol` and `emptyDirectory.medium` as `Memory`) associated with the pod to access the secret.
+Forked from https://github.com/aws-samples/aws-secret-sidecar-injector - thankyou to the authors for the starting point their proof-of-concept provided.
+
+_aws-secret-injector_ allows your containerized applications to consume secrets from AWS Secrets Manager. The solution makes use of a Kubernetes dynamic admission controller that injects an _init_ container upon creation/update of your pod. The init container expects that [IRSA](https://docs.aws.amazon.com/eks/latest/userguide/iam-roles-for-service-accounts.html) is configured to retrieve the secret from AWS Secrets Manager. The admission controller creates an in-memory Kubernetes volume associated with the pod to store the secret.
 
 ## Prerequsites 
-- An IRSA ServiceAccount that has permission to access and retrive the secret from AWS Secrets Manager
-- Helm to install the mutating admission webhook
+- An AWS account
+- IRSA configured on your Kubernetes cluster
 
 ## Installation
 
-### Deploying mutatating webhook to inject the init container 
+### Deploying the admission controller
 
-- Add the Helm repository which contains the Helm chart for the mutating admission webhook 
+You can use the [helm charts](https://github.com/ecrousseau/aws-secret-injector/tree/master/manifests/helm) supplied in this repo to install the admission controller. Warning: these charts are not well tested. 
 
-  ```helm repo add secret-inject https://aws-samples.github.io/aws-secret-sidecar-injector/```
+## Injecting secrets into your pods
 
-- Update the Helm repository 
+Add the following annotations to your podSpec to inject secrets into your pod:
 
-  ```helm repo update```
+  ```secrets.k8s.aws/injectorWebhook: init-container```
 
-- Deploy the mutating webhook admission controller
-
-  ```helm install secret-inject secret-inject/secret-inject```
-
-## Accessing the secret
-
-Add the following annotations to your podSpec to mount the secret in your pod 
-
-  ```secrets.k8s.aws/sidecarInjectorWebhook: enabled```
-
-  ```secrets.k8s.aws/secret-arn: <SECRET-ARN>```
+  ```secrets.k8s.aws/secretArns: <comma-separated list of ARNs>```
   
-The decrypted secret is written to a volume named `secret-vol` and the filename of the secret is `secret`. The Kubernetes dynamic admission controller also creates corresponding mountPath `/tmp/secret` for containers within the pod to access the secret. 
+The decrypted secrets are written to a volume named `secret-vol` mounted at `/injected-secrets` for all containers in the pod, with filenames matching the secret name. 
 
-This repository contains a sample Kubernetes deployment [manifest](https://github.com/aws-samples/aws-secret-sidecar-injector/blob/master/kubernetes-manifests/webserver.yaml) which uses this project to access AWS Secrets Manager secret.  
-
-## Creating Secrets
-
-AWS Secrets Manager secrets can be created and managed natively in Kubernetes using [Native Secrets(NASE)](https://github.com/mhausenblas/nase). The NASE project is a serverless mutating webhook, which "intercepts" the calls to create and update native Kubernetes Secrets and writes the secret in the secret manifest to AWS Secrets Manager and returns the ARN of the secret to Kubernetes which stores it as a secret.
+This repository contains an example Kubernetes deployment [manifest](https://github.com/ecrousseau/aws-secret-injector/blob/master/manifests/examples/webserver.yaml) to illustrate this usage.
 
 ## License
 
-This library is licensed under the MIT-0 License. See the LICENSE file.
-
+This software is licensed under the MIT-0 License. See the LICENSE file. This repository is maintained completely independently of Amazon or AWS.

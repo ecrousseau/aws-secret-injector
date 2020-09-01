@@ -2,33 +2,33 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   labels:
-    run: "secret-inject"
-  name: "secret-inject"
+    app: secret-inject
+  name: secret-inject
 spec:
   replicas: {{ .Values.replicaCount }}
   selector:
     matchLabels:
-      run: "secret-inject"
+      app: secret-inject
   template:
     metadata:
       labels:
-        run : "secret-inject"
+        app: secret-inject
     spec:
       volumes:
-        - name: certs
-          secret:
-            secretName: "secret-inject-tls"
+      - name: certs
+        secret:
+          secretName: secret-inject-tls
       containers:
-        - name: "secret-inject-init"
-          image: "docker.io/amazon/aws-secrets-manager-secret-adm-controller:v0.1.1"
-          volumeMounts:
-            - name: certs
-              mountPath: /tls
-              readOnly: true
-          args:
-          - "--tls-cert-file=/tls/tls.crt"
-          - "--tls-private-key-file=/tls/tls.key"
-          - "--sidecar-image=docker.io/amazon/aws-secrets-manager-secret-sidecar:v0.1.1"
-          ports:
-          - containerPort: 443
-          imagePullPolicy: Always
+      - name: secret-inject-init
+        image: erousseau/aws-secrets-injector-adm-controller:latest
+        volumeMounts:
+        - name: certs
+          mountPath: /tls
+          readOnly: true
+        args:
+        - --tls-cert-file=/tls/tls.crt
+        - --tls-private-key-file=/tls/tls.key
+        - --init-container-image=erousseau/aws-secrets-injector-init-container:latest
+        ports:
+        - containerPort: 443
+        imagePullPolicy: Always

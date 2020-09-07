@@ -18,9 +18,9 @@ You can use the [helm charts](https://github.com/ecrousseau/aws-secret-injector/
 
 Add the following annotations to your podSpec to inject secrets into your pod:
 
-  ```secrets.k8s.aws/injectorWebhook: init-container```
+  ```secrets.aws.k8s/injectorWebhook: init-container```
 
-  ```secrets.k8s.aws/secretArns: <comma-separated list of ARNs>```
+  ```secrets.aws.k8s/secretArns: <comma-separated list of ARNs>```
   
 The decrypted secrets are written to a volume named `secret-vol` mounted at `/injected-secrets` for all containers in the pod, with filenames matching the secret name. 
 

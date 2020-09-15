@@ -81,18 +81,17 @@ const init_container_patch string = `[
                 }
             }
         ]
-    },
-    {
-        "op":"add",
-        "path":"/spec/volumes/-",
-        "value":{
-            "emptyDir": {
-                "medium": "Memory"
-            },
-            "name": "secret-vol"
-        }
     }
 ]`
+
+type EmptyDir struct {
+    Medium string `json:"medium"`
+}
+
+type Volume struct {
+    Name string `json:"name"`
+    EmptyDir interface{} `json:"emptyDir"`
+}
 
 type VolumeMount struct {
     Name string `json:"name"`
@@ -108,6 +107,15 @@ type Patch struct {
 func hasContainer(containers []corev1.Container, containerName string) bool {
     for _, container := range containers {
         if container.Name == containerName {
+            return true
+        }
+    }
+    return false
+}
+
+func hasVolume(volumes []corev1.Volume, volumeName string) bool {
+    for _, volume := range volumes {
+        if volume.Name == volumeName {
             return true
         }
     }
@@ -159,9 +167,20 @@ func mutatePods(ar v1.AdmissionReview) *v1.AdmissionResponse {
         json.Unmarshal([]byte(fmt.Sprintf(init_container_patch, sidecarImage)), &patches)
     
         /* add patches for each container */
-        v := VolumeMount{"secret-vol", "/injected-secrets"}
+        vm := VolumeMount{"secret-vol", "/injected-secrets"}
         for i := range pod.Spec.Containers {
-            patch := Patch{"add", fmt.Sprintf("/spec/containers/%d/volumeMounts/-", i), v}
+            patch := Patch{"add", fmt.Sprintf("/spec/containers/%d/volumeMounts/-", i), vm}
+            patches = append(patches, patch)
+        }
+        
+        /* add patch to add volume 'secret-vol' if required */
+        if hasVolume(pod.Spec.Volumes, "secret-vol") {
+            klog.Info("Pod already has a volume named secret-vol. Secrets will be written to that volume.")
+        } else {
+            klog.Info("Adding an in-memory volume named secret-vol. Secrets will be written to that volume.")
+            ed := EmptyDir{"Memory"}
+            v := Volume{"secret-vol", ed}
+            patch := Patch{"add", "/spec/volumes/-", v}
             patches = append(patches, patch)
         }
         

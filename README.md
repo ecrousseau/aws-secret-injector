@@ -14,7 +14,9 @@ _aws-secret-injector_ allows your containerized applications to consume secrets 
 
 You can use the [helm charts](https://github.com/ecrousseau/aws-secret-injector/tree/master/manifests/helm) supplied in this repo to install the admission controller. Warning: these charts are not well tested. 
 
-## Injecting secrets into your pods
+## Usage
+
+### Injecting secrets into your pods
 
 Add the following annotations to your podSpec to inject secrets into your pod:
 
@@ -25,6 +27,16 @@ Add the following annotations to your podSpec to inject secrets into your pod:
 The decrypted secrets are written to a volume named `secret-vol` mounted at `/injected-secrets` for all containers in the pod, with filenames matching the secret name. 
 
 This repository contains an example Kubernetes deployment [manifest](https://github.com/ecrousseau/aws-secret-injector/blob/master/manifests/examples/webserver.yaml) to illustrate this usage.
+
+### Optional settings
+
+#### Proxy settings
+
+You can configure the init container to use a proxy by creating a ConfigMap named "proxy-settings" that contains keys "HTTPS_PROXY" and "NO_PROXY". These will be applied as environment variables in the init container.
+
+#### Pre-existing volume
+
+You can add a volume named "secret-vol" to your Pod spec. The init container will then write to that volume instead of the default in-memory volume. You may wish to do this if you need to mount the volume at a location other than `/injected-secrets`. Please ensure that the storage backing the volume you specify is secured appropriately!
 
 ## License
 

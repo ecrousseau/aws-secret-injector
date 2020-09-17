@@ -1,7 +1,6 @@
 package main
 
 import (
-    "encoding/base64"
     "fmt"
     "os"
     "strings"
@@ -63,30 +62,46 @@ func main() {
         }
         // Decrypts secret using the associated KMS CMK.
         // Depending on whether the secret is a string or binary, one of these fields will be populated.
-        var decodedBinarySecret string
+        //var decodedBinarySecret string
         if result.SecretString != nil {
-            writeOutput(*result.Name, *result.SecretString)
+            writeStringOutput(*result.Name, *result.SecretString)
         } else {
-            decodedBinarySecretBytes := make([]byte, base64.StdEncoding.DecodedLen(len(result.SecretBinary)))
-            len, err := base64.StdEncoding.Decode(decodedBinarySecretBytes, result.SecretBinary)
-            if err != nil {
-                klog.Error("Base64 Decode Error:", err)
-                continue
-            }
-            decodedBinarySecret = string(decodedBinarySecretBytes[:len])
-            writeOutput(*result.Name, decodedBinarySecret)
+            writeBinaryOutput(*result.Name, result.SecretBinary)
         }
         klog.Info("Done processing: ", secretArn)
     }
 }
 
-func writeOutput(name string, output string) {
+func writeStringOutput(name string, output string) {
+    klog.Info("Writing data from SecretString")
     f, err := os.Create(fmt.Sprintf("/injected-secrets/%s", name))
     if err != nil {
         klog.Error(err)
         return
     }
     defer f.Close()
-    f.WriteString(output)
-    klog.Info("Wrote to ", fmt.Sprintf("/injected-secrets/%s", name))
+    len, err := f.WriteString(output)
+    if err != nil {
+        klog.Error(err)
+        return
+    } else {
+        klog.Info(fmt.Sprintf("Wrote %d bytes to /injected-secrets/%s", len, name))
+    }
+}
+
+func writeBinaryOutput(name string, output []byte) {
+    klog.Info("Writing data from SecretBinary")
+    f, err := os.Create(fmt.Sprintf("/injected-secrets/%s", name))
+    if err != nil {
+        klog.Error(err)
+        return
+    }
+    defer f.Close()
+    len, err := f.Write(output)
+    if err != nil {
+        klog.Error(err)
+        return
+    } else {
+        klog.Info(fmt.Sprintf("Wrote %d bytes to /injected-secrets/%s", len, name))
+    }
 }

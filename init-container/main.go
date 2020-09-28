@@ -4,7 +4,6 @@ import (
     "fmt"
     "os"
     "strings"
-
     "github.com/aws/aws-sdk-go/aws"
     "github.com/aws/aws-sdk-go/aws/arn"
     "github.com/aws/aws-sdk-go/aws/awserr"
@@ -13,62 +12,81 @@ import (
     "k8s.io/klog"
 )
 
+type Secret struct {
+    Id string
+    Region string
+}
+
 func main() {
     envSecretArns := os.Getenv("SECRET_ARNS")
-    var AWSRegion string
-    klog.Info("SECRET_ARNS env var is ", envSecretArns)
-    secretArns := strings.Split(envSecretArns, ",")
-    for _, secretArn := range secretArns {
-        klog.Info("Processing:", secretArn)
-        if arn.IsARN(secretArn) {
-            arnobj, _ := arn.Parse(secretArn)
-            AWSRegion = arnobj.Region
-        } else {
-            klog.Error("Invalid ARN:", secretArn)
-            continue
-        }
-
-        sess := session.Must(session.NewSession())
-        svc := secretsmanager.New(sess, &aws.Config{
-            Region: aws.String(AWSRegion),
-        })
-
-        input := &secretsmanager.GetSecretValueInput{
-            SecretId:     aws.String(secretArn),
-            VersionStage: aws.String("AWSCURRENT"),
-        }
-
-        result, err := svc.GetSecretValue(input)
-        if err != nil {
-            if aerr, ok := err.(awserr.Error); ok {
-                switch aerr.Code() {
-                case secretsmanager.ErrCodeResourceNotFoundException:
-                    klog.Error(secretsmanager.ErrCodeResourceNotFoundException, aerr.Error())
-                case secretsmanager.ErrCodeInvalidParameterException:
-                    klog.Error(secretsmanager.ErrCodeInvalidParameterException, aerr.Error())
-                case secretsmanager.ErrCodeInvalidRequestException:
-                    klog.Error(secretsmanager.ErrCodeInvalidRequestException, aerr.Error())
-                case secretsmanager.ErrCodeDecryptionFailure:
-                    klog.Error(secretsmanager.ErrCodeDecryptionFailure, aerr.Error())
-                case secretsmanager.ErrCodeInternalServiceError:
-                    klog.Error(secretsmanager.ErrCodeInternalServiceError, aerr.Error())
-                default:
-                    klog.Error(aerr.Error())
-                }
-            } else {
-                klog.Error(err)
+    envSecretNames :=  os.Getenv("SECRET_NAMES")
+    envSecretRegion := os.Getenv("SECRET_REGION")
+    var secrets []Secret
+    if envSecretArns != "" { 
+        klog.Info("SECRET_ARNS env var is ", envSecretArns)
+        for _, secretArn := range strings.Split(envSecretArns, ",") {
+            if !arn.IsARN(secretArn) {
+                klog.Error("Invalid ARN: ", secretArn)
+                continue
             }
-            continue
+            parsedArn, _ := arn.Parse(secretArn)
+            secrets = append(secrets, Secret{
+                Id: secretArn,
+                Region: parsedArn.Region,
+            })
         }
-        // Decrypts secret using the associated KMS CMK.
-        // Depending on whether the secret is a string or binary, one of these fields will be populated.
-        //var decodedBinarySecret string
-        if result.SecretString != nil {
-            writeStringOutput(*result.Name, *result.SecretString)
+    } else if envSecretNames != "" {
+        klog.Info("SECRET_NAMES env var is ", envSecretNames, " and SECRET_REGION is ", envSecretRegion)
+        for _, name := range strings.Split(envSecretNames, ",") {
+            secrets = append(secrets, Secret{
+                Id: name,
+                Region: envSecretRegion,
+            })
+        }
+    } else {
+        klog.Error("Unable to read environment variables SECRET_ARNS or SECRET_NAMES")
+    }
+    for _, secret := range secrets {
+        klog.Info("Processing: ", secret.Id)
+        getSecretValue(secret)
+        klog.Info("Done processing: ", secret.Id)
+    }
+}
+
+func getSecretValue(secret Secret) {
+    sess := session.Must(session.NewSession())
+    svc := secretsmanager.New(sess, &aws.Config{
+        Region: aws.String(secret.Region),
+    })
+    input := &secretsmanager.GetSecretValueInput{
+        SecretId: aws.String(secret.Id),
+    }
+    result, err := svc.GetSecretValue(input)
+    if err != nil {
+        if aerr, ok := err.(awserr.Error); ok {
+            switch aerr.Code() {
+            case secretsmanager.ErrCodeResourceNotFoundException:
+                klog.Error(secretsmanager.ErrCodeResourceNotFoundException, aerr.Error())
+            case secretsmanager.ErrCodeInvalidParameterException:
+                klog.Error(secretsmanager.ErrCodeInvalidParameterException, aerr.Error())
+            case secretsmanager.ErrCodeInvalidRequestException:
+                klog.Error(secretsmanager.ErrCodeInvalidRequestException, aerr.Error())
+            case secretsmanager.ErrCodeDecryptionFailure:
+                klog.Error(secretsmanager.ErrCodeDecryptionFailure, aerr.Error())
+            case secretsmanager.ErrCodeInternalServiceError:
+                klog.Error(secretsmanager.ErrCodeInternalServiceError, aerr.Error())
+            default:
+                klog.Error(aerr.Error())
+            }
         } else {
-            writeBinaryOutput(*result.Name, result.SecretBinary)
+            klog.Error(err)
         }
-        klog.Info("Done processing: ", secretArn)
+        return
+    }
+    if result.SecretString != nil {
+        writeStringOutput(*result.Name, *result.SecretString)
+    } else {
+        writeBinaryOutput(*result.Name, result.SecretBinary)
     }
 }
 

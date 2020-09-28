@@ -33,7 +33,7 @@ var (
     certFile string
     keyFile  string
     port     int
-    sidecarImage string
+    initContainerImage string
 )
 
 func init() {
@@ -43,7 +43,7 @@ func init() {
         "File containing the default x509 private key matching --tls-cert-file.")
     flag.IntVar(&port, "port", 443,
         "Secure port that the webhook listens on")
-    flag.StringVar(&sidecarImage, "init-container-image", "",
+    flag.StringVar(&initContainerImage, "init-container-image", "",
         "Image to be used for the init container")
 
 }
@@ -92,7 +92,7 @@ func serve(w http.ResponseWriter, r *http.Request, admit admitHandler) {
         return
     }
 
-    klog.Info(fmt.Sprintf("handling request: %s", body))
+    klog.Info(fmt.Sprintf("Handling request: %s", body))
 
     deserializer := codecs.UniversalDeserializer()
     obj, gvk, err := deserializer.Decode(body, nil, nil)
@@ -149,7 +149,6 @@ func serve(w http.ResponseWriter, r *http.Request, admit admitHandler) {
 
 
 func serveMutatePods(w http.ResponseWriter, r *http.Request) {
-    klog.Info("%+v", r)
     serve(w, r, newDelegateToV1AdmitHandler(mutatePods))
 }
 

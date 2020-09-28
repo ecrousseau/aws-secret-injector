@@ -25,64 +25,58 @@ import (
     "encoding/json"
 )
 
-const init_container_patch string = `[
-    {
-        "op":"add",
-        "path":"/spec/initContainers",
-        "value":[
-            {
-                "image":"%v",
-                "name":"secrets-init-container",
-                "volumeMounts":[
-                    {
-                        "name":"secret-vol",
-                        "mountPath":"/injected-secrets"
-                    }
-                ],
-                "env":[
-                    {
-                        "name": "SECRET_ARNS",
-                        "valueFrom": {
-                            "fieldRef": {
-                                "fieldPath": "metadata.annotations['secrets.aws.k8s/secretArns']"
-                            }
-                        }
-                    },
-                    {
-                        "name": "HTTPS_PROXY",
-                        "valueFrom": {
-                            "configMapKeyRef": {
-                                "name": "proxy-settings",
-                                "key": "HTTPS_PROXY",
-                                "optional": true
-                            }
-                        }
-                    },
-                    {
-                        "name": "NO_PROXY",
-                        "valueFrom": {
-                            "configMapKeyRef": {
-                                "name": "proxy-settings",
-                                "key": "NO_PROXY",
-                                "optional": true
-                            }
-                        }
-                    }
-                ],
-                "resources":{
-                    "requests":{
-                        "cpu": "100m",
-                        "memory": "256Mi"
-                    },
-                    "limits":{
-                        "cpu": "100m",
-                        "memory": "256Mi"
-                    }
-                }
-            }
-        ]
-    }
-]`
+type FieldRef struct {
+    FieldPath string `json:"fieldPath"`
+}
+
+type ValueFromFieldRef struct {
+    FieldRef FieldRef `json:"fieldRef"`
+}
+
+type ConfigMapKeyRef  struct {
+    Name string `json:"name"`
+    Key string `json:"key"`
+    Optional bool `json:"optional"`
+}
+
+type ValueFromConfigMapKeyRef struct {
+    ConfigMapKeyRef ConfigMapKeyRef `json:"configMapKeyRef"`
+}
+
+type EnvValueFrom struct {
+    Name string `json:"name"`
+    ValueFrom interface{} `json:"valueFrom"`
+}
+
+type EnvValue struct {
+    Name string `json:"name"`
+    Value string `json:"value"`
+}
+
+type Env interface {}
+
+type Limits struct {
+    CPU string `json:"cpu"`
+    Memory string `json:"memory"`
+}
+
+type Requests struct {
+    CPU string `json:"cpu"`
+    Memory string `json:"memory"`
+}
+
+type Resources struct {
+    Requests Requests `json:"requests`
+    Limits Limits `json:"limits"`
+}
+
+type InitContainer struct {
+    Name string `json:"name"`
+    Image string `json:"image"`
+    VolumeMounts []VolumeMount `json:"volumeMounts"`
+    Env []Env `json:"env"`
+    Resources Resources `json:"resources"`
+}
 
 type EmptyDir struct {
     Medium string `json:"medium"`
@@ -90,7 +84,7 @@ type EmptyDir struct {
 
 type Volume struct {
     Name string `json:"name"`
-    EmptyDir interface{} `json:"emptyDir"`
+    EmptyDir EmptyDir `json:"emptyDir"`
 }
 
 type VolumeMount struct {
@@ -123,26 +117,25 @@ func hasVolume(volumes []corev1.Volume, volumeName string) bool {
 }
 
 func mutatePods(ar v1.AdmissionReview) *v1.AdmissionResponse {
-    klog.V(2).Info("mutating pods")
-    podResource := metav1.GroupVersionResource{Group: "", Version: "v1", Resource: "pods"}
-    if ar.Request.Resource != podResource {
-        klog.Errorf("expect resource to be %s", podResource)
-        return nil
+    klog.Info("Mutating pods")
+    /* prepare the response */
+    reviewResponse := v1.AdmissionResponse{Allowed: true}
+
+    /* examine the request */
+    podResourceType := metav1.GroupVersionResource{Group: "", Version: "v1", Resource: "pods"}
+    if ar.Request.Resource != podResourceType {
+        klog.Error("Unexpected resource type ", ar.Request.Resource)
+        return &reviewResponse  //something is wonky on the Kubernetes side - send back an "Allow"
     }
+
     /* deserialize the raw request into a pod object */
     raw := ar.Request.Object.Raw
     pod := corev1.Pod{}
     deserializer := codecs.UniversalDeserializer()
     if _, _, err := deserializer.Decode(raw, nil, &pod); err != nil {
-        klog.Error(err)
+        klog.Error("Unable to decode pod object: ", err)
         return toV1AdmissionResponse(err)
-    } else {
-        klog.Info("Pod spec:", pod)
     }
-
-    /* prepare the response */
-    reviewResponse := v1.AdmissionResponse{}
-    reviewResponse.Allowed = true
 
     /* examine the injectorWebhook annotation */
     klog.Info("Pod annotations:", pod.ObjectMeta.Annotations)
@@ -151,26 +144,72 @@ func mutatePods(ar v1.AdmissionReview) *v1.AdmissionResponse {
         klog.Info("Pod annotation secrets.aws.k8s/injectorWebhook not set - no action required")
         return &reviewResponse
     }
-    klog.Info("Pod annotation secrets.aws.k8s/injectorWebhook is set to %s", annotation_injector_webhook)
+    klog.Info("Pod annotation secrets.aws.k8s/injectorWebhook is set to ", annotation_injector_webhook)
 
     /* decide how to patch the pod */
     /* TODO add sidecar option */
     if annotation_injector_webhook == "init-container" {
         klog.Info("Injecting init container")
         if hasContainer(pod.Spec.InitContainers, "secrets-init-container") {
-            klog.Error("Pod already has an init-container named secrets-init-container")
-            return nil
+            err := "Pod already has an init container named secrets-init-container"
+            klog.Error(err)
+            return toV1AdmissionResponse(fmt.Errorf("%s", err))
         }
-
-        /* read the JSON string */
+        
         var patches []Patch
-        json.Unmarshal([]byte(fmt.Sprintf(init_container_patch, sidecarImage)), &patches)
-    
+
+        /* add init container patch */
+        env := []Env{
+            EnvValueFrom{"HTTPS_PROXY", ValueFromConfigMapKeyRef{ConfigMapKeyRef{"proxy-settings", "HTTPS_PROXY", true}}},
+            EnvValueFrom{"NO_PROXY", ValueFromConfigMapKeyRef{ConfigMapKeyRef{"proxy-settings", "NO_PROXY", true}}},
+        }
+        _, secretArnsSet := pod.ObjectMeta.Annotations["secrets.aws.k8s/secretArns"]
+        _, secretNamesSet := pod.ObjectMeta.Annotations["secrets.aws.k8s/secretNames"]
+        annotation_region, regionSet := pod.ObjectMeta.Annotations["secrets.aws.k8s/region"]
+        if secretArnsSet && secretNamesSet {
+            err := "Only one of pod annotations secrets.aws.k8s/secretArns and secrets.aws.k8s/secretNames can be set"
+            klog.Error(err)
+            return toV1AdmissionResponse(fmt.Errorf("%s", err))
+        }
+        if !secretArnsSet && !secretNamesSet {
+            err := "One of pod annotations secrets.aws.k8s/secretArns or secrets.aws.k8s/secretNames must be set"
+            klog.Error(err)
+            return toV1AdmissionResponse(fmt.Errorf("%s", err))
+        }
+        if secretArnsSet {
+            if regionSet {
+                klog.Warning("Pod annotation secrets.aws.k8s/secretArns is set, so secrets.aws.k8s/region will be ignored")
+            }
+            env = append(env, EnvValueFrom{"SECRET_ARNS", ValueFromFieldRef{FieldRef{"metadata.annotations['secrets.aws.k8s/secretArns']"}}})
+        } else if secretNamesSet {
+            if !regionSet {
+                err := "Pod annotation secrets.aws.k8s/secretNames requires that annotation secrets.aws.k8s/region is also set"
+                klog.Error(err)
+                return toV1AdmissionResponse(fmt.Errorf("%s", err))
+            } else {
+                env = append(env, EnvValue{"SECRET_REGION", annotation_region})
+                env = append(env, EnvValueFrom{"SECRET_NAMES", ValueFromFieldRef{FieldRef{"metadata.annotations['secrets.aws.k8s/secretNames']"}}})
+            }
+        }
+        patches = append(patches, Patch{
+            "add",
+            "/spec/initContainers",
+            []InitContainer{InitContainer{
+                "secrets-init-container",
+                initContainerImage,
+                []VolumeMount{VolumeMount{"secret-vol", "/injected-secrets"}},
+                env,
+                Resources{Requests{"100m", "128Mi"}, Limits{"100m", "256Mi"}},
+            }},
+        })
+
         /* add patches for each container */
-        vm := VolumeMount{"secret-vol", "/injected-secrets"}
         for i := range pod.Spec.Containers {
-            patch := Patch{"add", fmt.Sprintf("/spec/containers/%d/volumeMounts/-", i), vm}
-            patches = append(patches, patch)
+            patches = append(patches, Patch{
+                "add",
+                fmt.Sprintf("/spec/containers/%d/volumeMounts/-", i),
+                VolumeMount{"secret-vol", "/injected-secrets"},
+            })
         }
         
         /* add patch to add volume 'secret-vol' if required */
@@ -178,24 +217,21 @@ func mutatePods(ar v1.AdmissionReview) *v1.AdmissionResponse {
             klog.Info("Pod already has a volume named secret-vol. Secrets will be written to that volume.")
         } else {
             klog.Info("Adding an in-memory volume named secret-vol. Secrets will be written to that volume.")
-            ed := EmptyDir{"Memory"}
-            v := Volume{"secret-vol", ed}
-            patch := Patch{"add", "/spec/volumes/-", v}
-            patches = append(patches, patch)
+            patches = append(patches, Patch{"add", "/spec/volumes/-", Volume{"secret-vol", EmptyDir{"Memory"}}})
         }
         
         /* reconstruct the JSON string */    
-        b, err := json.Marshal(patches)
+        patchBytes, err := json.Marshal(patches)
         if err != nil {
-            fmt.Printf(err.Error())
+            klog.Error("Error marshalling JSON: ", err)
+            return toV1AdmissionResponse(err)
         }
-        reviewResponse.Patch = b
-        pt := v1.PatchTypeJSONPatch
-        reviewResponse.PatchType = &pt
-        klog.Info("Patch: ", string(b))
+        reviewResponse.Patch = patchBytes
+        patchType := v1.PatchTypeJSONPatch
+        reviewResponse.PatchType = &patchType
+        klog.Info("Patch: ", string(patchBytes))
     }
 
-    /* log and send the response */
-    klog.Info(reviewResponse.String())
+    /* send the response */
     return &reviewResponse
 }

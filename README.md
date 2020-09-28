@@ -18,11 +18,21 @@ You can use the [helm charts](https://github.com/ecrousseau/aws-secret-injector/
 
 ### Injecting secrets into your pods
 
-Add the following annotations to your podSpec to inject secrets into your pod:
+Add the injectorWebhook annotation to your podSpec to inject secrets into your pod:
 
   ```secrets.aws.k8s/injectorWebhook: init-container```
 
+And add either the secret ARNs:
+
   ```secrets.aws.k8s/secretArns: <comma-separated list of ARNs>```
+
+Or the secret names and AWS region:
+
+  ```secrets.aws.k8s/secretNames: <comma-separated list of friendly names>```
+
+  ```secrets.aws.k8s/region: <AWS region for the secrets>```
+
+If your secrets are spread across multiple regions you must use the ARN format. Note that the ARN does not need to include the "hash" - see the documentation on incomplete ARNs [here](https://docs.aws.amazon.com/sdk-for-go/api/service/secretsmanager/#GetSecretValueInput).
   
 The decrypted secrets are written to a volume named `secret-vol` mounted at `/injected-secrets` for all containers in the pod, with filenames matching the secret name. 
 

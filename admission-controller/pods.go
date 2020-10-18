@@ -165,6 +165,7 @@ func mutatePods(ar v1.AdmissionReview) *v1.AdmissionResponse {
         }
         _, secretArnsSet := pod.ObjectMeta.Annotations["secrets.aws.k8s/secretArns"]
         _, secretNamesSet := pod.ObjectMeta.Annotations["secrets.aws.k8s/secretNames"]
+        _, explodeJsonKeysSet := pod.ObjectMeta.Annotations["secrets.aws.k8s/explodeJsonKeys"]
         annotation_region, regionSet := pod.ObjectMeta.Annotations["secrets.aws.k8s/region"]
         if secretArnsSet && secretNamesSet {
             err := "Only one of pod annotations secrets.aws.k8s/secretArns and secrets.aws.k8s/secretNames can be set"
@@ -190,6 +191,9 @@ func mutatePods(ar v1.AdmissionReview) *v1.AdmissionResponse {
                 env = append(env, EnvValue{"SECRET_REGION", annotation_region})
                 env = append(env, EnvValueFrom{"SECRET_NAMES", ValueFromFieldRef{FieldRef{"metadata.annotations['secrets.aws.k8s/secretNames']"}}})
             }
+        }
+        if explodeJsonKeysSet {
+            env = append(env, EnvValueFrom{"EXPLODE_JSON_KEYS", ValueFromFieldRef{FieldRef{"metadata.annotations['secrets.aws.k8s/explodeJsonKeys']"}}})
         }
         patches = append(patches, Patch{
             "add",

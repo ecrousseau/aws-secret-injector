@@ -32,6 +32,10 @@ Or the secret names and AWS region:
 
   ```secrets.aws.k8s/region: <AWS region for the secrets>```
 
+Optional flag for exploding json format in secret manager into into individual file. This only works for exploding string type secrets (not binary) and that it applies to all secrets.
+
+  ```secrets.aws.k8s/explodeJsonKeys: <true/false> ```
+
 If your secrets are spread across multiple regions you must use the ARN format. Note that the ARN does not need to include the "hash" - see the documentation on incomplete ARNs [here](https://docs.aws.amazon.com/sdk-for-go/api/service/secretsmanager/#GetSecretValueInput).
   
 The decrypted secrets are written to a volume named `secret-vol` mounted at `/injected-secrets` for all containers in the pod, with filenames matching the secret name. 

@@ -24,12 +24,12 @@ func main() {
     envSecretNames :=  os.Getenv("SECRET_NAMES")
     envSecretRegion := os.Getenv("SECRET_REGION")
     envExplodeJsonKeys := os.Getenv("EXPLODE_JSON_KEYS")
-    var secrets []Secret
-    if envExplodeJsonKeys != "" {
-        explodeJsonKeys = strconv.ParseBool(envExplodeJsonKeys)
-    } else {
-        explodeJsonKeys = false
+    explodeJsonKeys := false
+    parsedEnvExplodeJsonKeys, err := strconv.ParseBool(envExplodeJsonKeys)
+    if !err {
+        explodeJsonKeys = parsedEnvExplodeJsonKeys
     }
+    var secrets []Secret
     if envSecretArns != "" { 
         klog.Info("SECRET_ARNS env var is ", envSecretArns)
         for _, secretArn := range strings.Split(envSecretArns, ",") {

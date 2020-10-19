@@ -7,27 +7,35 @@ import (
     "strconv"
     "github.com/aws/aws-sdk-go/aws"
     "github.com/aws/aws-sdk-go/aws/arn"
-    "github.com/aws/aws-sdk-go/aws/awserr"
     "github.com/aws/aws-sdk-go/aws/session"
+    "github.com/aws/aws-sdk-go/aws/endpoints"
     "github.com/aws/aws-sdk-go/service/secretsmanager"
     "k8s.io/klog"
     "encoding/json"
 )
 
+// Secret is used to represent the secrets that are to be retrieved and written to file.
 type Secret struct {
     Id string
     Region string
     ExplodeJson bool
 }
 
+
+// main is the entry point for the init container.
 func main() {
     envSecretArns := os.Getenv("SECRET_ARNS")
     envSecretNames :=  os.Getenv("SECRET_NAMES")
     envSecretRegion := os.Getenv("SECRET_REGION")
-    envExplodeJsonKeys, err := strconv.ParseBool(os.Getenv("EXPLODE_JSON_KEYS"))
-    if err != nil {
-        klog.Error("EXPLODE_JSON_KEYS env var could not be parsed")
-        os.Exit(1)
+    envExplodeJsonKeys := false
+    if os.Getenv("EXPLODE_JSON_KEYS") != "" {
+        parsedEnvExplodeJsonKeys, err := strconv.ParseBool(os.Getenv("EXPLODE_JSON_KEYS"))
+        if err != nil {
+            klog.Error("EXPLODE_JSON_KEYS env var could not be parsed")
+            os.Exit(1)
+        } else {
+            envExplodeJsonKeys = parsedEnvExplodeJsonKeys
+        }
     }
     var secrets []Secret
     if envSecretArns != "" { 
@@ -35,7 +43,7 @@ func main() {
         for _, secretArn := range strings.Split(envSecretArns, ",") {
             if !arn.IsARN(secretArn) {
                 klog.Error("Invalid ARN: ", secretArn)
-                continue
+                os.Exit(2)
             }
             parsedArn, _ := arn.Parse(secretArn)
             secrets = append(secrets, Secret{
@@ -55,134 +63,123 @@ func main() {
         }
     } else {
         klog.Error("Unable to read environment variables SECRET_ARNS or SECRET_NAMES")
+        os.Exit(3)
+    }
+    stsRegionalEndpoint, _ := endpoints.GetSTSRegionalEndpoint("legacy")
+    if os.Getenv("AWS_STS_REGIONAL_ENDPOINTS") != "" {
+        parsedSTSRegionalEndpoint, err := endpoints.GetSTSRegionalEndpoint(os.Getenv("AWS_STS_REGIONAL_ENDPOINTS"))
+        if err != nil {
+            klog.Error("AWS_STS_REGIONAL_ENDPOINTS env var could not be parsed")
+            os.Exit(4)
+        }
+        stsRegionalEndpoint = parsedSTSRegionalEndpoint
+    }
+    awsSession, err := session.NewSessionWithOptions(session.Options{
+        Config: aws.Config{
+            CredentialsChainVerboseErrors: aws.Bool(true),
+            STSRegionalEndpoint: stsRegionalEndpoint,
+        },
+    })
+    if err != nil {
+        klog.Info("Error while creating AWS session: ", err)
+        os.Exit(5)
     }
     for _, secret := range secrets {
         klog.Info("Processing: ", secret.Id)
-        err := getSecretValue(secret)
+        err := getSecretValue(awsSession, secret)
         if err != nil {
-            klog.Info("Encountered error while processing: ", secret.Id)
-            os.Exit(1)
+            klog.Info("Error while processing: ", secret.Id)
+            os.Exit(6)
         }
         klog.Info("Done processing: ", secret.Id)
     }
 }
 
-func getSecretValue(secret Secret) error {
-    sess := session.Must(session.NewSession())
-    svc := secretsmanager.New(sess, &aws.Config{
-        Region: aws.String(secret.Region),
-    })
+// getSecretValue retrieves secrets from AWS Secrets Manager and writes the values to files.
+func getSecretValue(awsSession *session.Session, secret Secret) error {
+    svc := secretsmanager.New(awsSession, &aws.Config{Region: aws.String(secret.Region)})
     input := &secretsmanager.GetSecretValueInput{
         SecretId: aws.String(secret.Id),
     }
     result, err := svc.GetSecretValue(input)
     if err != nil {
-        if aerr, ok := err.(awserr.Error); ok {
-            switch aerr.Code() {
-            case secretsmanager.ErrCodeResourceNotFoundException:
-                klog.Error(secretsmanager.ErrCodeResourceNotFoundException, aerr.Error())
-            case secretsmanager.ErrCodeInvalidParameterException:
-                klog.Error(secretsmanager.ErrCodeInvalidParameterException, aerr.Error())
-            case secretsmanager.ErrCodeInvalidRequestException:
-                klog.Error(secretsmanager.ErrCodeInvalidRequestException, aerr.Error())
-            case secretsmanager.ErrCodeDecryptionFailure:
-                klog.Error(secretsmanager.ErrCodeDecryptionFailure, aerr.Error())
-            case secretsmanager.ErrCodeInternalServiceError:
-                klog.Error(secretsmanager.ErrCodeInternalServiceError, aerr.Error())
-            default:
-                klog.Error(aerr.Error())
-            }
-        } else {
-            klog.Error(err)
-        }
+        klog.Error("Error while getting secret value: ", err)
         return err
     }
     if result.SecretString != nil {
         if secret.ExplodeJson {
-            writeJsonOutput(*result.Name, *result.SecretString)
+            return writeJsonOutput(*result.Name, *result.SecretString)
         } else {
-            writeStringOutput(*result.Name, *result.SecretString)
+            return writeStringOutput(*result.Name, *result.SecretString)
         }
     } else {
-        writeBinaryOutput(*result.Name, result.SecretBinary)
+        return writeBinaryOutput(*result.Name, result.SecretBinary)
     }
-    return nil
 }
 
+// writeJsonOutput writes a JSON string representing a map of key-value pairs to a set of files.
+// The files are named according to the keys.
+// Complex values are re-encoded as JSON.
 func writeJsonOutput(name string, output string) error {
-    klog.Info("Exploding json data from SecretString into files")
-
+    klog.Infof("Exploding json data from %s into files", name)
     var result map[string]interface{}
-    errJson := json.Unmarshal([]byte(output), &result)
-    //In case the body is not json
-    if errJson != nil {
-        klog.Info("The SecretString is not json")
-        f, err := os.Create(fmt.Sprintf("/injected-secrets/%s", name))
-        if err != nil {
-            klog.Error(err)
-            return err
-        }
-        defer f.Close()
-        len, err := f.WriteString(output)
-        if err != nil {
-            klog.Error(err)
-            return err
-        } else {
-            klog.Info(fmt.Sprintf("Wrote %d bytes to /injected-secrets/%s", len, name))
-        }
+    err := json.Unmarshal([]byte(output), &result)
+    if err != nil {
+        klog.Warningf("Value for %s could not be parsed as JSON and will be written directly to file", name)
+        writeStringOutput(name, output)
     } else {
         for key, value := range result {
-            // Each value is an interface{} type, that is type asserted as a string
-            f, err := os.Create(fmt.Sprintf("/injected-secrets/%s/%s", name, key))
-            if err != nil {
-                klog.Error(err)
-                return err
-            }
-            defer f.Close()
-            len, err := f.WriteString(value.(string))
-            if err != nil {
-                klog.Error(err)
-                return err
+            valueString, ok := value.(string)
+            if ok {
+                writeStringOutput(fmt.Sprintf("%s/%s", name, key), valueString)
             } else {
-                klog.Info(fmt.Sprintf("Wrote %d bytes to /injected-secrets/%s/%s", len, name, key))
+                klog.Warningf("Unable to convert value for %s[%s] to string, encoding it as JSON", name, key)
+                valueBytes, err := json.Marshal(value)
+                if err != nil {
+                    klog.Errorf("Error encoding value of %s[%s] to JSON: %s", name, key, err)
+                    return err
+                }
+                writeBinaryOutput(fmt.Sprintf("%s/%s", name, key), valueBytes)
             }
         }
     }
     return nil
 }
 
+// writeStringOutput writes a string to file.
 func writeStringOutput(name string, output string) error {
-    klog.Info("Writing data from SecretString")
+    klog.Infof("Writing string data to %s", name)
     f, err := os.Create(fmt.Sprintf("/injected-secrets/%s", name))
     if err != nil {
-        klog.Error(err)
+        klog.Errorf("Error creating file /injected-secrets/%s: %s", name, err)
         return err
     }
     defer f.Close()
     len, err := f.WriteString(output)
     if err != nil {
-        klog.Error(err)
+        klog.Errorf("Error writing to file /injected-secrets/%s: %s", name, err)
         return err
     } else {
-        klog.Info(fmt.Sprintf("Wrote %d bytes to /injected-secrets/%s", len, name))
+        klog.Infof("Wrote %d bytes to /injected-secrets/%s", len, name)
     }
     return nil
 }
 
+// writeBinaryOutput writes a slice of bytes to file.
 func writeBinaryOutput(name string, output []byte) error {
-    klog.Info("Writing data from SecretBinary")
+    klog.Infof("Writing binary data to /injected-secrets/%s", name)
     f, err := os.Create(fmt.Sprintf("/injected-secrets/%s", name))
     if err != nil {
-        klog.Error(err)
+        klog.Errorf("Error creating file /injected-secrets/%s: %s", name, err)
         return err
     }
     defer f.Close()
     len, err := f.Write(output)
     if err != nil {
-        klog.Error(err)
+        klog.Errorf("Error writing to file /injected-secrets/%s: %s", name, err)
         return err
     } else {
-        klog.Info(fmt.Sprintf("Wrote %d bytes to /injected-secrets/%s", len, name))
+        klog.Infof("Wrote %d bytes to /injected-secrets/%s", len, name)
     }
     return nil
 }

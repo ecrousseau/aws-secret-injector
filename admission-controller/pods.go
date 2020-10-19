@@ -90,6 +90,7 @@ type Volume struct {
 type VolumeMount struct {
     Name string `json:"name"`
     MountPath string `json:"mountPath"`
+    ReadOnly bool `json:"readOnly,omitempty"`
 }
 
 type Patch struct {
@@ -116,16 +117,30 @@ func hasVolume(volumes []corev1.Volume, volumeName string) bool {
     return false
 }
 
+func getRoleArn(containers []corev1.Container) (string, error) {
+    for _, container := range containers {
+        for _, envVar := range container.Env {
+            if envVar.Name == "AWS_ROLE_ARN" {
+                return envVar.Value, nil
+            }
+        }
+    }
+    return "", fmt.Errorf("Unable to determine value for AWS_ROLE_ARN")
+}
+
 func mutatePods(ar v1.AdmissionReview) *v1.AdmissionResponse {
     klog.Info("Mutating pods")
     /* prepare the response */
-    reviewResponse := v1.AdmissionResponse{Allowed: true}
+    reviewResponse := v1.AdmissionResponse{
+        Allowed: true,
+        UID: ar.Request.UID,
+    }
 
     /* examine the request */
     podResourceType := metav1.GroupVersionResource{Group: "", Version: "v1", Resource: "pods"}
     if ar.Request.Resource != podResourceType {
         klog.Error("Unexpected resource type ", ar.Request.Resource)
-        return &reviewResponse  //something is wonky on the Kubernetes side - send back an "Allow"
+        return &reviewResponse  //something is wonky on the Kubernetes side - just send back an "Allow"
     }
 
     /* deserialize the raw request into a pod object */
@@ -134,7 +149,7 @@ func mutatePods(ar v1.AdmissionReview) *v1.AdmissionResponse {
     deserializer := codecs.UniversalDeserializer()
     if _, _, err := deserializer.Decode(raw, nil, &pod); err != nil {
         klog.Error("Unable to decode pod object: ", err)
-        return toV1AdmissionResponse(err)
+        return toV1AdmissionResponse(err, ar)
     }
 
     /* examine the injectorWebhook annotation */
@@ -153,7 +168,7 @@ func mutatePods(ar v1.AdmissionReview) *v1.AdmissionResponse {
         if hasContainer(pod.Spec.InitContainers, "secrets-init-container") {
             err := "Pod already has an init container named secrets-init-container"
             klog.Error(err)
-            return toV1AdmissionResponse(fmt.Errorf("%s", err))
+            return toV1AdmissionResponse(fmt.Errorf("%s", err), ar)
         }
         
         var patches []Patch
@@ -162,6 +177,7 @@ func mutatePods(ar v1.AdmissionReview) *v1.AdmissionResponse {
         env := []Env{
             EnvValueFrom{"HTTPS_PROXY", ValueFromConfigMapKeyRef{ConfigMapKeyRef{"proxy-settings", "HTTPS_PROXY", true}}},
             EnvValueFrom{"NO_PROXY", ValueFromConfigMapKeyRef{ConfigMapKeyRef{"proxy-settings", "NO_PROXY", true}}},
+            EnvValue{"AWS_STS_REGIONAL_ENDPOINTS", "regional"},
         }
         _, secretArnsSet := pod.ObjectMeta.Annotations["secrets.aws.k8s/secretArns"]
         _, secretNamesSet := pod.ObjectMeta.Annotations["secrets.aws.k8s/secretNames"]
@@ -170,38 +186,58 @@ func mutatePods(ar v1.AdmissionReview) *v1.AdmissionResponse {
         if secretArnsSet && secretNamesSet {
             err := "Only one of pod annotations secrets.aws.k8s/secretArns and secrets.aws.k8s/secretNames can be set"
             klog.Error(err)
-            return toV1AdmissionResponse(fmt.Errorf("%s", err))
+            return toV1AdmissionResponse(fmt.Errorf("%s", err), ar)
         }
         if !secretArnsSet && !secretNamesSet {
             err := "One of pod annotations secrets.aws.k8s/secretArns or secrets.aws.k8s/secretNames must be set"
             klog.Error(err)
-            return toV1AdmissionResponse(fmt.Errorf("%s", err))
+            return toV1AdmissionResponse(fmt.Errorf("%s", err), ar)
         }
         if secretArnsSet {
             if regionSet {
                 klog.Warning("Pod annotation secrets.aws.k8s/secretArns is set, so secrets.aws.k8s/region will be ignored")
             }
-            env = append(env, EnvValueFrom{"SECRET_ARNS", ValueFromFieldRef{FieldRef{"metadata.annotations['secrets.aws.k8s/secretArns']"}}})
+            env = append(env, EnvValueFrom{
+                "SECRET_ARNS", 
+                ValueFromFieldRef{FieldRef{"metadata.annotations['secrets.aws.k8s/secretArns']"}},
+            })
         } else if secretNamesSet {
             if !regionSet {
                 err := "Pod annotation secrets.aws.k8s/secretNames requires that annotation secrets.aws.k8s/region is also set"
                 klog.Error(err)
-                return toV1AdmissionResponse(fmt.Errorf("%s", err))
+                return toV1AdmissionResponse(fmt.Errorf("%s", err), ar)
             } else {
                 env = append(env, EnvValue{"SECRET_REGION", annotation_region})
-                env = append(env, EnvValueFrom{"SECRET_NAMES", ValueFromFieldRef{FieldRef{"metadata.annotations['secrets.aws.k8s/secretNames']"}}})
+                env = append(env, EnvValueFrom{
+                    "SECRET_NAMES", 
+                    ValueFromFieldRef{FieldRef{"metadata.annotations['secrets.aws.k8s/secretNames']"}},
+                })
             }
         }
         if explodeJsonKeysSet {
-            env = append(env, EnvValueFrom{"EXPLODE_JSON_KEYS", ValueFromFieldRef{FieldRef{"metadata.annotations['secrets.aws.k8s/explodeJsonKeys']"}}})
+            env = append(env, EnvValueFrom{
+                "EXPLODE_JSON_KEYS", 
+                ValueFromFieldRef{FieldRef{"metadata.annotations['secrets.aws.k8s/explodeJsonKeys']"}},
+            })
+        }
+        volumeMounts := []VolumeMount{VolumeMount{"secret-vol", "/injected-secrets", false}}
+        if hasVolume(pod.Spec.Volumes, "aws-iam-token") {
+            /* pod has already been through the IRSA webhook, so we need to do some work */
+            volumeMounts = append(volumeMounts, VolumeMount{"aws-iam-token", "/var/run/secrets/eks.amazonaws.com/serviceaccount", true})
+            roleArn, err := getRoleArn(pod.Spec.Containers)
+            if err != nil {
+                return toV1AdmissionResponse(fmt.Errorf("%s", err), ar)
+            }
+            env = append(env, EnvValue{"AWS_ROLE_ARN", roleArn})
+            env = append(env, EnvValue{"AWS_WEB_IDENTITY_TOKEN_FILE", "/var/run/secrets/eks.amazonaws.com/serviceaccount/token"})
         }
         patches = append(patches, Patch{
             "add",
-            "/spec/initContainers/-",
+            "/spec/initContainers/0",
             InitContainer{
                 "secrets-init-container",
                 initContainerImage,
-                []VolumeMount{VolumeMount{"secret-vol", "/injected-secrets"}},
+                volumeMounts,
                 env,
                 Resources{Requests{"100m", "128Mi"}, Limits{"100m", "256Mi"}},
             },
@@ -212,7 +248,7 @@ func mutatePods(ar v1.AdmissionReview) *v1.AdmissionResponse {
             patches = append(patches, Patch{
                 "add",
                 fmt.Sprintf("/spec/containers/%d/volumeMounts/-", i),
-                VolumeMount{"secret-vol", "/injected-secrets"},
+                VolumeMount{"secret-vol", "/injected-secrets", false},
             })
         }
         
@@ -228,7 +264,7 @@ func mutatePods(ar v1.AdmissionReview) *v1.AdmissionResponse {
         patchBytes, err := json.Marshal(patches)
         if err != nil {
             klog.Error("Error marshalling JSON: ", err)
-            return toV1AdmissionResponse(err)
+            return toV1AdmissionResponse(err, ar)
         }
         reviewResponse.Patch = patchBytes
         patchType := v1.PatchTypeJSONPatch

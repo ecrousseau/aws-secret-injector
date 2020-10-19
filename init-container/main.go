@@ -86,7 +86,7 @@ func main() {
     }
     for _, secret := range secrets {
         klog.Info("Processing: ", secret.Id)
-        err := getSecretValue(awsSession, secret)
+        err := WriteSecretValue(awsSession, secret)
         if err != nil {
             klog.Info("Error while processing: ", secret.Id)
             os.Exit(6)
@@ -95,8 +95,8 @@ func main() {
     }
 }
 
-// getSecretValue retrieves secrets from AWS Secrets Manager and writes the values to files.
-func getSecretValue(awsSession *session.Session, secret Secret) error {
+// WriteSecretValue retrieves secrets from AWS Secrets Manager and writes the values to files.
+func WriteSecretValue(awsSession *session.Session, secret Secret) error {
     svc := secretsmanager.New(awsSession, &aws.Config{Region: aws.String(secret.Region)})
     input := &secretsmanager.GetSecretValueInput{
         SecretId: aws.String(secret.Id),
@@ -108,25 +108,25 @@ func getSecretValue(awsSession *session.Session, secret Secret) error {
     }
     if result.SecretString != nil {
         if secret.ExplodeJson {
-            return writeJsonOutput(*result.Name, *result.SecretString)
+            return WriteJsonOutput(*result.Name, *result.SecretString)
         } else {
-            return writeStringOutput(*result.Name, *result.SecretString)
+            return WriteStringOutput(*result.Name, *result.SecretString)
         }
     } else {
-        return writeBinaryOutput(*result.Name, result.SecretBinary)
+        return WriteBinaryOutput(*result.Name, result.SecretBinary)
     }
 }
 
-// writeJsonOutput writes a JSON string representing a map of key-value pairs to a set of files.
+// WriteJsonOutput writes a JSON string representing a map of key-value pairs to a set of files.
 // The files are named according to the keys.
 // Complex values are re-encoded as JSON.
-func writeJsonOutput(name string, output string) error {
+func WriteJsonOutput(name string, output string) error {
     klog.Infof("Exploding json data from %s into files", name)
     var result map[string]interface{}
     err := json.Unmarshal([]byte(output), &result)
     if err != nil {
         klog.Warningf("Value for %s could not be parsed as JSON and will be written directly to file", name)
-        writeStringOutput(name, output)
+        WriteStringOutput(name, output)
     } else {
         err = os.Mkdir(fmt.Sprintf("/injected-secrets/%s", name))
         if err != nil {
@@ -136,7 +136,7 @@ func writeJsonOutput(name string, output string) error {
         for key, value := range result {
             valueString, ok := value.(string)
             if ok {
-                writeStringOutput(fmt.Sprintf("%s/%s", name, key), valueString)
+                WriteStringOutput(fmt.Sprintf("%s/%s", name, key), valueString)
             } else {
                 klog.Warningf("Unable to convert value for %s[%s] to string, encoding it as JSON", name, key)
                 valueBytes, err := json.Marshal(value)
@@ -144,15 +144,15 @@ func writeJsonOutput(name string, output string) error {
                     klog.Errorf("Error encoding value of %s[%s] to JSON: %s", name, key, err)
                     return err
                 }
-                writeBinaryOutput(fmt.Sprintf("%s/%s", name, key), valueBytes)
+                WriteBinaryOutput(fmt.Sprintf("%s/%s", name, key), valueBytes)
             }
         }
     }
     return nil
 }
 
-// writeStringOutput writes a string to file.
-func writeStringOutput(name string, output string) error {
+// WriteStringOutput writes a string to file.
+func WriteStringOutput(name string, output string) error {
     klog.Infof("Writing string data to %s", name)
     f, err := os.Create(fmt.Sprintf("/injected-secrets/%s", name))
     if err != nil {
@@ -170,8 +170,8 @@ func writeStringOutput(name string, output string) error {
     return nil
 }
 
-// writeBinaryOutput writes a slice of bytes to file.
-func writeBinaryOutput(name string, output []byte) error {
+// WriteBinaryOutput writes a slice of bytes to file.
+func WriteBinaryOutput(name string, output []byte) error {
     klog.Infof("Writing binary data to /injected-secrets/%s", name)
     f, err := os.Create(fmt.Sprintf("/injected-secrets/%s", name))
     if err != nil {

@@ -11,6 +11,7 @@ import (
     "github.com/aws/aws-sdk-go/aws/session"
     "github.com/aws/aws-sdk-go/service/secretsmanager"
     "k8s.io/klog"
+    "encoding/json"
 )
 
 type Secret struct {
@@ -23,11 +24,10 @@ func main() {
     envSecretArns := os.Getenv("SECRET_ARNS")
     envSecretNames :=  os.Getenv("SECRET_NAMES")
     envSecretRegion := os.Getenv("SECRET_REGION")
-    envExplodeJsonKeys := os.Getenv("EXPLODE_JSON_KEYS")
-    explodeJsonKeys := false
-    parsedEnvExplodeJsonKeys, err := strconv.ParseBool(envExplodeJsonKeys)
-    if !err {
-        explodeJsonKeys = parsedEnvExplodeJsonKeys
+    envExplodeJsonKeys, err := strconv.ParseBool(os.Getenv("EXPLODE_JSON_KEYS"))
+    if err != nil {
+        klog.Error("EXPLODE_JSON_KEYS env var could not be parsed")
+        os.Exit(1)
     }
     var secrets []Secret
     if envSecretArns != "" { 
@@ -58,12 +58,16 @@ func main() {
     }
     for _, secret := range secrets {
         klog.Info("Processing: ", secret.Id)
-        getSecretValue(secret)
+        err := getSecretValue(secret)
+        if err != nil {
+            klog.Info("Encountered error while processing: ", secret.Id)
+            os.Exit(1)
+        }
         klog.Info("Done processing: ", secret.Id)
     }
 }
 
-func getSecretValue(secret Secret) {
+func getSecretValue(secret Secret) error {
     sess := session.Must(session.NewSession())
     svc := secretsmanager.New(sess, &aws.Config{
         Region: aws.String(secret.Region),
@@ -91,7 +95,7 @@ func getSecretValue(secret Secret) {
         } else {
             klog.Error(err)
         }
-        return
+        return err
     }
     if result.SecretString != nil {
         if secret.ExplodeJson {
@@ -102,9 +106,10 @@ func getSecretValue(secret Secret) {
     } else {
         writeBinaryOutput(*result.Name, result.SecretBinary)
     }
+    return nil
 }
 
-func writeJsonOutput(name string, output string) {
+func writeJsonOutput(name string, output string) error {
     klog.Info("Exploding json data from SecretString into files")
 
     var result map[string]interface{}
@@ -115,13 +120,13 @@ func writeJsonOutput(name string, output string) {
         f, err := os.Create(fmt.Sprintf("/injected-secrets/%s", name))
         if err != nil {
             klog.Error(err)
-            return
+            return err
         }
         defer f.Close()
         len, err := f.WriteString(output)
         if err != nil {
             klog.Error(err)
-            return
+            return err
         } else {
             klog.Info(fmt.Sprintf("Wrote %d bytes to /injected-secrets/%s", len, name))
         }
@@ -131,50 +136,53 @@ func writeJsonOutput(name string, output string) {
             f, err := os.Create(fmt.Sprintf("/injected-secrets/%s/%s", name, key))
             if err != nil {
                 klog.Error(err)
-                return
+                return err
             }
             defer f.Close()
             len, err := f.WriteString(value.(string))
             if err != nil {
                 klog.Error(err)
-                return
+                return err
             } else {
                 klog.Info(fmt.Sprintf("Wrote %d bytes to /injected-secrets/%s/%s", len, name, key))
             }
         }
     }
+    return nil
 }
 
-func writeStringOutput(name string, output string) {
+func writeStringOutput(name string, output string) error {
     klog.Info("Writing data from SecretString")
     f, err := os.Create(fmt.Sprintf("/injected-secrets/%s", name))
     if err != nil {
         klog.Error(err)
-        return
+        return err
     }
     defer f.Close()
     len, err := f.WriteString(output)
     if err != nil {
         klog.Error(err)
-        return
+        return err
     } else {
         klog.Info(fmt.Sprintf("Wrote %d bytes to /injected-secrets/%s", len, name))
     }
+    return nil
 }
 
-func writeBinaryOutput(name string, output []byte) {
+func writeBinaryOutput(name string, output []byte) error {
     klog.Info("Writing data from SecretBinary")
     f, err := os.Create(fmt.Sprintf("/injected-secrets/%s", name))
     if err != nil {
         klog.Error(err)
-        return
+        return err
     }
     defer f.Close()
     len, err := f.Write(output)
     if err != nil {
         klog.Error(err)
-        return
+        return err
     } else {
         klog.Info(fmt.Sprintf("Wrote %d bytes to /injected-secrets/%s", len, name))
     }
+    return nil
 }

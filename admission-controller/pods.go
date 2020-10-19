@@ -197,14 +197,14 @@ func mutatePods(ar v1.AdmissionReview) *v1.AdmissionResponse {
         }
         patches = append(patches, Patch{
             "add",
-            "/spec/initContainers",
-            []InitContainer{InitContainer{
+            "/spec/initContainers/-",
+            InitContainer{
                 "secrets-init-container",
                 initContainerImage,
                 []VolumeMount{VolumeMount{"secret-vol", "/injected-secrets"}},
                 env,
                 Resources{Requests{"100m", "128Mi"}, Limits{"100m", "256Mi"}},
-            }},
+            },
         })
 
         /* add patches for each container */

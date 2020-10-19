@@ -21,5 +21,6 @@ jobs:
           DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
         run: |
           RELEASE_TAG=${GITHUB_REF#refs/tags/}
+          echo $DOCKERHUB_TOKEN | docker login --username erousseau --password-stdin
           docker push docker.io/erousseau/aws-secrets-injector-init-container:${RELEASE_TAG}
           docker push docker.io/erousseau/aws-secrets-injector-adm-controller:${RELEASE_TAG}

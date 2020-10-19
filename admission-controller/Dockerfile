@@ -4,9 +4,9 @@ RUN curl -o go1.14.3.linux-amd64.tar.gz https://dl.google.com/go/go1.14.3.linux-
 RUN tar -C /usr/local -xzf go1.14.3.linux-amd64.tar.gz
 ENV PATH="/usr/local/go/bin:${PATH}"
 WORKDIR /src
-COPY ./go.mod ./go.sum ./
+COPY ./go.mod /src/go.mod
 RUN go mod download
-COPY . ./
+COPY . /src
 RUN go build -o /app -v
 
 FROM amazonlinux:latest

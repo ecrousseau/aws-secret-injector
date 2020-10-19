@@ -1,9 +1,8 @@
 module main
 
-go 1.13
+go 1.14
 
 require (
-	github.com/aws/aws-sdk-go v1.30.27
-	golang.org/x/net v0.0.0-20200513185701-a91f0712d120 // indirect
+	github.com/aws/aws-sdk-go v1.35.9
 	k8s.io/klog v1.0.0
 )

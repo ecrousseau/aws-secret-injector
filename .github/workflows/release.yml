@@ -15,10 +15,11 @@ jobs:
         run: |
           RELEASE_TAG=${GITHUB_REF#refs/tags/}
           docker build init-container -t docker.io/erousseau/aws-secrets-injector-init-container:${RELEASE_TAG}
-          docker build adm-controller -t docker.io/erousseau/aws-secrets-injector-adm-controller:${RELEASE_TAG}
+          docker build admission-controller -t docker.io/erousseau/aws-secrets-injector-adm-controller:${RELEASE_TAG}
       - name: Push 🚀
         env:
           DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
         run: |
           RELEASE_TAG=${GITHUB_REF#refs/tags/}
           docker push docker.io/erousseau/aws-secrets-injector-init-container:${RELEASE_TAG}
+          docker push docker.io/erousseau/aws-secrets-injector-adm-controller:${RELEASE_TAG}

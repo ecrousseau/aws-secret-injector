@@ -15,9 +15,10 @@ jobs:
       - name: Build 🔧
         run: |
           docker build init-container -t docker.io/erousseau/aws-secrets-injector-init-container:latest
-          docker build adm-controller -t docker.io/erousseau/aws-secrets-injector-adm-controller:latest
+          docker build admission-controller -t docker.io/erousseau/aws-secrets-injector-adm-controller:latest
       - name: Push 🚀
         env:
           DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
         run: |
           docker push docker.io/erousseau/aws-secrets-injector-init-container:latest
+          docker push docker.io/erousseau/aws-secrets-injector-adm-controller:latest

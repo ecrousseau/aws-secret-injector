@@ -128,7 +128,7 @@ func WriteJsonOutput(name string, output string) error {
         klog.Warningf("Value for %s could not be parsed as JSON and will be written directly to file", name)
         WriteStringOutput(name, output)
     } else {
-        err = os.Mkdir(fmt.Sprintf("/injected-secrets/%s", name))
+        err = os.Mkdir(fmt.Sprintf("/injected-secrets/%s", name), 0755)
         if err != nil {
             klog.Errorf("Error creating directory /injected-secrets/%s: %s", name, err)
             return err

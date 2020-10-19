@@ -1,6 +1,6 @@
 # AWS Secret Injector
 
-[![Build Status](https://github.com/ecrousseau/aws-secret-injector/workflows/master/badge.svg)](https://github.com/ecrousseau}/aws-secret-injector/actions)
+[![Build Status](https://github.com/ecrousseau/aws-secret-injector/workflows/master/badge.svg)](https://github.com/ecrousseau/aws-secret-injector/actions)
 
 Forked from https://github.com/aws-samples/aws-secret-sidecar-injector - thankyou to the authors for the starting point their proof-of-concept provided.
 

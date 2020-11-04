@@ -14,7 +14,7 @@ _aws-secret-injector_ allows your containerized applications to consume secrets 
 
 ### Deploying the admission controller
 
-You can use the [helm charts](https://github.com/ecrousseau/aws-secret-injector/tree/master/manifests/helm) supplied in this repo to install the admission controller. Warning: these charts are not well tested. 
+You can use the [helm charts](https://github.com/ecrousseau/aws-secret-injector/tree/master/manifests/helm) supplied in this repo to install the admission controller. Alternatively, you can use the templates within the helm chart as a guide to creating your own manifests.
 
 ## Usage
 

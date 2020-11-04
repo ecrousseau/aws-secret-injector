@@ -1,14 +1,14 @@
-{{ $tls := fromYaml ( include "secret-inject.gen-certs" . ) }}
+{{ $tls := fromYaml ( include "aws-secret-injector.gen-certs" . ) }}
 ---
 apiVersion: admissionregistration.k8s.io/v1beta1
 kind: MutatingWebhookConfiguration
 metadata:
-  name: secret-inject
+  name: aws-secret-injector
 webhooks:
-- name: secret-inject
+- name: awssecretinjector.rousseau.id.au
   clientConfig:
     service:
-      name: secret-inject
+      name: aws-secret-injector
       namespace: {{ .Release.Namespace }}
       path: "/mutating-pods"
     caBundle: {{ $tls.caCert }}
@@ -24,7 +24,7 @@ webhooks:
 apiVersion: v1
 kind: Secret
 metadata:
-  name: secret-inject-tls
+  name: aws-secret-injector-tls
 type: kubernetes.io/tls
 data:
   tls.crt: {{ $tls.clientCert }}

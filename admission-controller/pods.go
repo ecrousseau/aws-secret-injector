@@ -76,6 +76,7 @@ type InitContainer struct {
     VolumeMounts []VolumeMount `json:"volumeMounts"`
     Env []Env `json:"env"`
     Resources Resources `json:"resources"`
+    SecurityContext corev1.SecurityContext `json:"securityContext"`
 }
 
 type EmptyDir struct {
@@ -231,6 +232,9 @@ func mutatePods(ar v1.AdmissionReview) *v1.AdmissionResponse {
             env = append(env, EnvValue{"AWS_ROLE_ARN", roleArn})
             env = append(env, EnvValue{"AWS_WEB_IDENTITY_TOKEN_FILE", "/var/run/secrets/eks.amazonaws.com/serviceaccount/token"})
         }
+        readOnlyRootFilesystem := true
+        allowPrivilegeEscalation  := false
+        privileged := false
         patches = append(patches, Patch{
             "add",
             "/spec/initContainers/0",
@@ -240,6 +244,11 @@ func mutatePods(ar v1.AdmissionReview) *v1.AdmissionResponse {
                 volumeMounts,
                 env,
                 Resources{Requests{"100m", "128Mi"}, Limits{"100m", "256Mi"}},
+                corev1.SecurityContext{
+                    ReadOnlyRootFilesystem: &readOnlyRootFilesystem,
+                    AllowPrivilegeEscalation: &allowPrivilegeEscalation,
+                    Privileged: &privileged,
+                },
             },
         })
 

@@ -235,10 +235,19 @@ func mutatePods(ar v1.AdmissionReview) *v1.AdmissionResponse {
         readOnlyRootFilesystem := true
         allowPrivilegeEscalation  := false
         privileged := false
+        /* create path /spec/initContainers if its missing */
+        if len(pod.Spec.InitContainers) == 0 {
+            initContainers := make([]InitContainer, 0) /* using make ensures the resulting JSON is [] */
+            patches = append(patches, Patch{
+                Op: "add",
+                Path: "/spec/initContainers",
+                Value: initContainers,
+            })
+        }
         patches = append(patches, Patch{
-            "add",
-            "/spec/initContainers/0",
-            InitContainer{
+            Op: "add",
+            Path: "/spec/initContainers/0",
+            Value: InitContainer{
                 "secrets-init-container",
                 initContainerImage,
                 volumeMounts,
@@ -255,9 +264,9 @@ func mutatePods(ar v1.AdmissionReview) *v1.AdmissionResponse {
         /* add patches for each container */
         for i := range pod.Spec.Containers {
             patches = append(patches, Patch{
-                "add",
-                fmt.Sprintf("/spec/containers/%d/volumeMounts/-", i),
-                VolumeMount{"secret-vol", "/injected-secrets", false},
+                Op: "add",
+                Path: fmt.Sprintf("/spec/containers/%d/volumeMounts/-", i),
+                Value: VolumeMount{"secret-vol", "/injected-secrets", false},
             })
         }
         

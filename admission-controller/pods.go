@@ -21,78 +21,15 @@ import (
     "k8s.io/api/admission/v1"
     corev1 "k8s.io/api/core/v1"
     metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-    "k8s.io/klog"
+    "k8s.io/apimachinery/pkg/api/resource"
+    "k8s.io/klog/v2"
     "encoding/json"
 )
 
-type FieldRef struct {
-    FieldPath string `json:"fieldPath"`
-}
-
-type ValueFromFieldRef struct {
-    FieldRef FieldRef `json:"fieldRef"`
-}
-
-type ConfigMapKeyRef  struct {
-    Name string `json:"name"`
-    Key string `json:"key"`
-    Optional bool `json:"optional"`
-}
-
-type ValueFromConfigMapKeyRef struct {
-    ConfigMapKeyRef ConfigMapKeyRef `json:"configMapKeyRef"`
-}
-
-type EnvValueFrom struct {
-    Name string `json:"name"`
-    ValueFrom interface{} `json:"valueFrom"`
-}
-
-type EnvValue struct {
-    Name string `json:"name"`
-    Value string `json:"value"`
-}
-
-type Env interface {}
-
-type Limits struct {
-    CPU string `json:"cpu"`
-    Memory string `json:"memory"`
-}
-
-type Requests struct {
-    CPU string `json:"cpu"`
-    Memory string `json:"memory"`
-}
-
-type Resources struct {
-    Requests Requests `json:"requests`
-    Limits Limits `json:"limits"`
-}
-
-type InitContainer struct {
-    Name string `json:"name"`
-    Image string `json:"image"`
-    VolumeMounts []VolumeMount `json:"volumeMounts"`
-    Env []Env `json:"env"`
-    Resources Resources `json:"resources"`
-    SecurityContext corev1.SecurityContext `json:"securityContext"`
-}
-
-type EmptyDir struct {
-    Medium string `json:"medium"`
-}
-
-type Volume struct {
-    Name string `json:"name"`
-    EmptyDir EmptyDir `json:"emptyDir"`
-}
-
-type VolumeMount struct {
-    Name string `json:"name"`
-    MountPath string `json:"mountPath"`
-    ReadOnly bool `json:"readOnly,omitempty"`
-}
+var (
+    False = false
+    True = true
+)
 
 type Patch struct {
     Op string `json:"op"`
@@ -156,7 +93,7 @@ func mutatePods(ar v1.AdmissionReview) *v1.AdmissionResponse {
     /* examine the injectorWebhook annotation */
     klog.Info("Pod annotations:", pod.ObjectMeta.Annotations)
     annotation_injector_webhook, ok := pod.ObjectMeta.Annotations["secrets.aws.k8s/injectorWebhook"]
-    if !ok { 
+    if !ok {
         klog.Info("Pod annotation secrets.aws.k8s/injectorWebhook not set - no action required")
         return &reviewResponse
     }
@@ -175,10 +112,35 @@ func mutatePods(ar v1.AdmissionReview) *v1.AdmissionResponse {
         var patches []Patch
 
         /* add init container patch */
-        env := []Env{
-            EnvValueFrom{"HTTPS_PROXY", ValueFromConfigMapKeyRef{ConfigMapKeyRef{"proxy-settings", "HTTPS_PROXY", true}}},
-            EnvValueFrom{"NO_PROXY", ValueFromConfigMapKeyRef{ConfigMapKeyRef{"proxy-settings", "NO_PROXY", true}}},
-            EnvValue{"AWS_STS_REGIONAL_ENDPOINTS", "regional"},
+        env := []corev1.EnvVar{
+            corev1.EnvVar{
+                Name: "HTTPS_PROXY",
+                ValueFrom: &corev1.EnvVarSource{
+                    ConfigMapKeyRef: &corev1.ConfigMapKeySelector{
+                        LocalObjectReference: corev1.LocalObjectReference{
+                            Name: "proxy-settings",
+                        },
+                        Key: "HTTPS_PROXY",
+                        Optional: &False,
+                    },
+                },
+            },
+            corev1.EnvVar{
+                Name: "NO_PROXY",
+                ValueFrom: &corev1.EnvVarSource{
+                    ConfigMapKeyRef: &corev1.ConfigMapKeySelector{
+                        LocalObjectReference: corev1.LocalObjectReference{
+                            Name: "proxy-settings",
+                        },
+                        Key: "NO_PROXY",
+                        Optional: &False,
+                    },
+                },
+            },
+            corev1.EnvVar{
+                Name: "AWS_STS_REGIONAL_ENDPOINTS", 
+                Value: "regional",
+            },
         }
         _, secretArnsSet := pod.ObjectMeta.Annotations["secrets.aws.k8s/secretArns"]
         _, secretNamesSet := pod.ObjectMeta.Annotations["secrets.aws.k8s/secretNames"]
@@ -198,9 +160,13 @@ func mutatePods(ar v1.AdmissionReview) *v1.AdmissionResponse {
             if regionSet {
                 klog.Warning("Pod annotation secrets.aws.k8s/secretArns is set, so secrets.aws.k8s/region will be ignored")
             }
-            env = append(env, EnvValueFrom{
-                "SECRET_ARNS", 
-                ValueFromFieldRef{FieldRef{"metadata.annotations['secrets.aws.k8s/secretArns']"}},
+            env = append(env, corev1.EnvVar{
+                Name: "SECRET_ARNS",
+                ValueFrom: &corev1.EnvVarSource{
+                    FieldRef: &corev1.ObjectFieldSelector{
+                        FieldPath: "metadata.annotations['secrets.aws.k8s/secretArns']",
+                    },
+                },
             })
         } else if secretNamesSet {
             if !regionSet {
@@ -208,36 +174,60 @@ func mutatePods(ar v1.AdmissionReview) *v1.AdmissionResponse {
                 klog.Error(err)
                 return toV1AdmissionResponse(fmt.Errorf("%s", err), ar)
             } else {
-                env = append(env, EnvValue{"SECRET_REGION", annotation_region})
-                env = append(env, EnvValueFrom{
-                    "SECRET_NAMES", 
-                    ValueFromFieldRef{FieldRef{"metadata.annotations['secrets.aws.k8s/secretNames']"}},
+                env = append(env, corev1.EnvVar{
+                    Name: "SECRET_REGION",
+                    Value: annotation_region,
+                })
+                env = append(env, corev1.EnvVar{
+                    Name: "SECRET_NAMES", 
+                    ValueFrom: &corev1.EnvVarSource{
+                        FieldRef: &corev1.ObjectFieldSelector{
+                            FieldPath: "metadata.annotations['secrets.aws.k8s/secretNames']",
+                        },
+                    },
                 })
             }
         }
         if explodeJsonKeysSet {
-            env = append(env, EnvValueFrom{
-                "EXPLODE_JSON_KEYS", 
-                ValueFromFieldRef{FieldRef{"metadata.annotations['secrets.aws.k8s/explodeJsonKeys']"}},
+            env = append(env, corev1.EnvVar{
+                Name: "EXPLODE_JSON_KEYS", 
+                ValueFrom: &corev1.EnvVarSource{
+                    FieldRef: &corev1.ObjectFieldSelector{
+                        FieldPath: "metadata.annotations['secrets.aws.k8s/explodeJsonKeys']",
+                    },
+                },
             })
         }
-        volumeMounts := []VolumeMount{VolumeMount{"secret-vol", "/injected-secrets", false}}
+        volumeMounts := []corev1.VolumeMount{
+            corev1.VolumeMount{
+                Name: "secret-vol",
+                MountPath: "/injected-secrets",
+                ReadOnly: false,
+            },
+        }
         if hasVolume(pod.Spec.Volumes, "aws-iam-token") {
             /* pod has already been through the IRSA webhook, so we need to do some work */
-            volumeMounts = append(volumeMounts, VolumeMount{"aws-iam-token", "/var/run/secrets/eks.amazonaws.com/serviceaccount", true})
+            volumeMounts = append(volumeMounts, corev1.VolumeMount{
+                Name: "aws-iam-token",
+                MountPath: "/var/run/secrets/eks.amazonaws.com/serviceaccount",
+                ReadOnly: true,
+            })
             roleArn, err := getRoleArn(pod.Spec.Containers)
             if err != nil {
                 return toV1AdmissionResponse(fmt.Errorf("%s", err), ar)
             }
-            env = append(env, EnvValue{"AWS_ROLE_ARN", roleArn})
-            env = append(env, EnvValue{"AWS_WEB_IDENTITY_TOKEN_FILE", "/var/run/secrets/eks.amazonaws.com/serviceaccount/token"})
+            env = append(env, corev1.EnvVar{
+                Name: "AWS_ROLE_ARN",
+                Value: roleArn,
+            })
+            env = append(env, corev1.EnvVar{
+                Name: "AWS_WEB_IDENTITY_TOKEN_FILE",
+                Value: "/var/run/secrets/eks.amazonaws.com/serviceaccount/token",
+            })
         }
-        readOnlyRootFilesystem := true
-        allowPrivilegeEscalation  := false
-        privileged := false
         /* create path /spec/initContainers if its missing */
         if len(pod.Spec.InitContainers) == 0 {
-            initContainers := make([]InitContainer, 0) /* using make ensures the resulting JSON is [] */
+            initContainers := make([]corev1.Container, 0) /* using make ensures the resulting JSON is [] */
             patches = append(patches, Patch{
                 Op: "add",
                 Path: "/spec/initContainers",
@@ -247,16 +237,25 @@ func mutatePods(ar v1.AdmissionReview) *v1.AdmissionResponse {
         patches = append(patches, Patch{
             Op: "add",
             Path: "/spec/initContainers/0",
-            Value: InitContainer{
-                "secrets-init-container",
-                initContainerImage,
-                volumeMounts,
-                env,
-                Resources{Requests{"100m", "128Mi"}, Limits{"100m", "256Mi"}},
-                corev1.SecurityContext{
-                    ReadOnlyRootFilesystem: &readOnlyRootFilesystem,
-                    AllowPrivilegeEscalation: &allowPrivilegeEscalation,
-                    Privileged: &privileged,
+            Value: corev1.Container{
+                Name: "secrets-init-container",
+                Image: config.InitContainerImage,
+                VolumeMounts: volumeMounts,
+                Env: env,
+                Resources: corev1.ResourceRequirements{
+                    Requests: corev1.ResourceList{
+                        "CPU": resource.MustParse("100m"),
+                        "Memory": resource.MustParse("128Mi"),
+                    },
+                    Limits: corev1.ResourceList{
+                        "CPU": resource.MustParse("100m"),
+                        "Memory": resource.MustParse("256Mi"),
+                    },
+                },
+                SecurityContext: &corev1.SecurityContext{
+                    ReadOnlyRootFilesystem: &True,
+                    AllowPrivilegeEscalation: &False,
+                    Privileged: &False,
                 },
             },
         })
@@ -266,7 +265,11 @@ func mutatePods(ar v1.AdmissionReview) *v1.AdmissionResponse {
             patches = append(patches, Patch{
                 Op: "add",
                 Path: fmt.Sprintf("/spec/containers/%d/volumeMounts/-", i),
-                Value: VolumeMount{"secret-vol", "/injected-secrets", false},
+                Value: corev1.VolumeMount{
+                    Name: "secret-vol",
+                    MountPath: "/injected-secrets",
+                    ReadOnly: false,
+                },
             })
         }
         
@@ -275,7 +278,18 @@ func mutatePods(ar v1.AdmissionReview) *v1.AdmissionResponse {
             klog.Info("Pod already has a volume named secret-vol. Secrets will be written to that volume.")
         } else {
             klog.Info("Adding an in-memory volume named secret-vol. Secrets will be written to that volume.")
-            patches = append(patches, Patch{"add", "/spec/volumes/-", Volume{"secret-vol", EmptyDir{"Memory"}}})
+            patches = append(patches, Patch{
+                Op: "add",
+                Path: "/spec/volumes/-",
+                Value: corev1.Volume{
+                    Name: "secret-vol",
+                    VolumeSource: corev1.VolumeSource{
+                        EmptyDir: &corev1.EmptyDirVolumeSource{
+                            Medium: "Memory",
+                        },
+                    },
+                },
+            })
         }
         
         /* reconstruct the JSON string */    

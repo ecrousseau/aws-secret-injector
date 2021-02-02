@@ -1,15 +1,24 @@
-FROM amazonlinux AS build
-RUN yum -y update && yum -y install tar gzip
-RUN curl -o go1.14.3.linux-amd64.tar.gz https://dl.google.com/go/go1.14.3.linux-amd64.tar.gz -s
-RUN tar -C /usr/local -xzf go1.14.3.linux-amd64.tar.gz
-ENV PATH="/usr/local/go/bin:${PATH}"
-WORKDIR /src
-COPY ./go.mod /src/go.mod
-RUN go mod download
-COPY . /src
-RUN go build -o /app -v
+# Copyright 2017 The Kubernetes Authors.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
 
-FROM amazonlinux:latest
-RUN yum -y update && yum install -y ca-certificates && rm -rf /var/cache/yum/*
-COPY --from=build /app /app
-ENTRYPOINT ["/app"]
+FROM golang AS builder
+WORKDIR /app
+COPY . .
+RUN go get -v
+RUN CGO_ENABLED=0 go build -o injector
+
+FROM scratch
+COPY --from=builder /app/injector /app/injector
+WORKDIR /app
+ENTRYPOINT ["/app/injector"]

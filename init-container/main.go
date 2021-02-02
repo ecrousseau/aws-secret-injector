@@ -10,7 +10,7 @@ import (
     "github.com/aws/aws-sdk-go/aws/session"
     "github.com/aws/aws-sdk-go/aws/endpoints"
     "github.com/aws/aws-sdk-go/service/secretsmanager"
-    "k8s.io/klog"
+    "k8s.io/klog/v2"
     "encoding/json"
 )
 
@@ -20,7 +20,6 @@ type Secret struct {
     Region string
     ExplodeJson bool
 }
-
 
 // main is the entry point for the init container.
 func main() {

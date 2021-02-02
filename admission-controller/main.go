@@ -26,27 +26,12 @@ import (
     v1 "k8s.io/api/admission/v1"
     "k8s.io/api/admission/v1beta1"
     "k8s.io/apimachinery/pkg/runtime"
-    "k8s.io/klog"
+    "k8s.io/klog/v2"
 )
 
 var (
-    certFile string
-    keyFile  string
-    port     int
-    initContainerImage string
+    config Config
 )
-
-func init() {
-    flag.StringVar(&certFile, "tls-cert-file", "",
-        "File containing the default x509 Certificate for HTTPS. (CA cert, if any, concatenated after server cert).")
-    flag.StringVar(&keyFile, "tls-private-key-file", "",
-        "File containing the default x509 private key matching --tls-cert-file.")
-    flag.IntVar(&port, "port", 443,
-        "Secure port that the webhook listens on")
-    flag.StringVar(&initContainerImage, "init-container-image", "",
-        "Image to be used for the init container")
-
-}
 
 // admitv1beta1Func handles a v1beta1 admission
 type admitv1beta1Func func(v1beta1.AdmissionReview) *v1beta1.AdmissionResponse
@@ -157,15 +142,10 @@ func main() {
     klog.InitFlags(loggingFlags)
     flag.Parse()
 
-    config := Config{
-        CertFile: certFile,
-        KeyFile:  keyFile,
-    }
-
     http.HandleFunc("/mutating-pods", serveMutatePods)
     http.HandleFunc("/readyz", func(w http.ResponseWriter, req *http.Request) { w.Write([]byte("ok")) })
     server := &http.Server{
-        Addr:      fmt.Sprintf(":%d", port),
+        Addr:      fmt.Sprintf(":%d", config.Port),
         TLSConfig: configTLS(config),
     }
     err := server.ListenAndServeTLS("", "")

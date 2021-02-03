@@ -244,12 +244,12 @@ func mutatePods(ar admission.AdmissionReview) *admission.AdmissionResponse {
                 Env: env,
                 Resources: core.ResourceRequirements{
                     Requests: core.ResourceList{
-                        "CPU": resource.MustParse("100m"),
-                        "Memory": resource.MustParse("128Mi"),
+                        "cpu": resource.MustParse("100m"),
+                        "memory": resource.MustParse("128Mi"),
                     },
                     Limits: core.ResourceList{
-                        "CPU": resource.MustParse("100m"),
-                        "Memory": resource.MustParse("256Mi"),
+                        "cpu": resource.MustParse("100m"),
+                        "memory": resource.MustParse("256Mi"),
                     },
                 },
                 SecurityContext: &core.SecurityContext{

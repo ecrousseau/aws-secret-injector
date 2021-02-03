@@ -17,8 +17,6 @@ limitations under the License.
 package main
 
 import (
-    "crypto/tls"
-    "k8s.io/klog/v2"
     "flag"
 )
 
@@ -26,7 +24,6 @@ import (
 type Config struct {
     CertFile string
     KeyFile  string
-    Port int
     InitContainerImage string
 }
 
@@ -36,19 +33,6 @@ func (c *Config) addFlags() {
         "after server cert).")
     flag.StringVar(&c.KeyFile, "tls-private-key-file", c.KeyFile, ""+
         "File containing the default x509 private key matching --tls-cert-file.")
-    flag.IntVar(&c.Port, "port", c.Port,
-        "Secure port that the webhook listens on")
     flag.StringVar(&c.InitContainerImage, "init-container-image", c.InitContainerImage,
         "Image to be used for the init container")
-}
-func configTLS(config Config) *tls.Config {
-    sCert, err := tls.LoadX509KeyPair(config.CertFile, config.KeyFile)
-    if err != nil {
-        klog.Fatal(err)
-    }
-    return &tls.Config{
-        Certificates: []tls.Certificate{sCert},
-        // TODO: uses mutual tls after we agree on what cert the apiserver should use.
-        // ClientAuth:   tls.RequireAndVerifyClientCert,
-    }
 }

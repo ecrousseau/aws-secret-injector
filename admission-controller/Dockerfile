@@ -21,4 +21,5 @@ RUN CGO_ENABLED=0 go build -o webhook
 FROM scratch
 COPY --from=builder /app/webhook /app/webhook
 WORKDIR /app
+USER 1337:1337
 ENTRYPOINT ["/app/webhook"]

@@ -14,13 +14,17 @@ spec:
       labels:
         app: aws-secret-injector
     spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1337
+        runAsGroup: 1337
       volumes:
       - name: certs
         secret:
           secretName: aws-secret-injector-tls
       containers:
-      - name: adm-controller
-        image: erousseau/aws-secrets-injector-adm-controller:v1.4
+      - name: admission-controller
+        image: erousseau/aws-secret-injector/admission-controller:v1.6
         volumeMounts:
         - name: certs
           mountPath: /tls
@@ -28,7 +32,18 @@ spec:
         args:
         - --tls-cert-file=/tls/tls.crt
         - --tls-private-key-file=/tls/tls.key
-        - --init-container-image=erousseau/aws-secrets-injector-init-container:v1.4
+        - --init-container-image=erousseau/aws-secret-injector/init-container:v1.6
         ports:
-        - containerPort: 443
+        - containerPort: 8443
         imagePullPolicy: Always
+        securityContext:
+          privileged: false
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+        resources:
+          requests:
+            cpu: 100m
+            memory: 64Mi
+          limits:
+            cpu: 100m
+            memory: 256Mi

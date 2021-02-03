@@ -20,12 +20,13 @@ spec:
     metadata:
       annotations:
         secrets.aws.k8s/injectorWebhook: init-container
-        secrets.aws.k8s/secretArns: arn:aws:secretsmanager:us-east-1:123456789012:secret:database-password-hlRvvF,arn:aws:secretsmanager:us-east-1:123456789012:secret:database-password-hlRvvG
+        secrets.aws.k8s/secretRegion: AWS_REGION
+        secrets.aws.k8s/secretNames: SECRET_NAME_1,SECRET_NAME_2
       labels:
         app: secrets-testing
     spec:
       serviceAccountName: secrets-testing
       containers:
-      - image: busybox:1.28
+      - image: busybox
         name: busybox
         command: ['sh', '-c', 'echo $(ls /injected-secrets/ && cat /injected-secrets/*) && sleep 3600']

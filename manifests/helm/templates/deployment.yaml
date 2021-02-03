@@ -16,15 +16,15 @@ spec:
     spec:
       securityContext:
         runAsNonRoot: true
-        runAsUser: 1337
-        runAsGroup: 1337
+        runAsUser: {{ .Values.securityContext.runAsUser }}
+        runAsGroup: {{ .Values.securityContext.runAsGroup }}
       volumes:
       - name: certs
         secret:
           secretName: aws-secret-injector-tls
       containers:
       - name: admission-controller
-        image: erousseau/aws-secret-injector/admission-controller:v1.6
+        image: {{ .Values.images.admission_controller.registry }}/{{ .Values.images.admission_controller.repository }}:{{ .Values.images.admission_controller.tag }}
         volumeMounts:
         - name: certs
           mountPath: /tls
@@ -32,7 +32,7 @@ spec:
         args:
         - --tls-cert-file=/tls/tls.crt
         - --tls-private-key-file=/tls/tls.key
-        - --init-container-image=erousseau/aws-secret-injector/init-container:v1.6
+        - --init-container-image={{ .Values.images.init_container.registry }}/{{ .Values.images.init_container.repository }}:{{ .Values.images.init_container.tag }}
         ports:
         - containerPort: 8443
         imagePullPolicy: Always

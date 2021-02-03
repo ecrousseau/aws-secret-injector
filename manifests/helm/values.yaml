@@ -4,3 +4,15 @@
 
 replicaCount: 2
 createPodDisruptionBudget: true
+images:
+  admission_controller:
+    registry: ghcr.io
+    repository: ecrousseau/aws-secret-injector/admission-controller
+    tag: latest
+  init_container:
+    registry: ghcr.io
+    repository: ecrousseau/aws-secret-injector/init-container
+    tag: latest
+securityContext:
+  runAsUser: 1337
+  runAsGroup: 1337

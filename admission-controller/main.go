@@ -93,6 +93,7 @@ func serveMutatePods(w http.ResponseWriter, r *http.Request) {
 
 func main() {
     klog.InitFlags(&flag.FlagSet{})
+    config.addFlags()
     flag.Parse()
 
     http.HandleFunc("/mutating-pods", serveMutatePods)

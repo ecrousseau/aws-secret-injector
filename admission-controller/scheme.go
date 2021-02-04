@@ -17,11 +17,9 @@ limitations under the License.
 package main
 
 import (
-	admissionv1 "k8s.io/api/admission/v1"
-	admissionv1beta1 "k8s.io/api/admission/v1beta1"
-	admissionregistrationv1 "k8s.io/api/admissionregistration/v1"
-	admissionregistrationv1beta1 "k8s.io/api/admissionregistration/v1beta1"
-	corev1 "k8s.io/api/core/v1"
+	admission "k8s.io/api/admission/v1"
+	admissionregistration "k8s.io/api/admissionregistration/v1"
+	core "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/serializer"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
@@ -35,9 +33,7 @@ func init() {
 }
 
 func addToScheme(scheme *runtime.Scheme) {
-	utilruntime.Must(corev1.AddToScheme(scheme))
-	utilruntime.Must(admissionv1beta1.AddToScheme(scheme))
-	utilruntime.Must(admissionregistrationv1beta1.AddToScheme(scheme))
-	utilruntime.Must(admissionv1.AddToScheme(scheme))
-	utilruntime.Must(admissionregistrationv1.AddToScheme(scheme))
+	utilruntime.Must(core.AddToScheme(scheme))
+	utilruntime.Must(admission.AddToScheme(scheme))
+	utilruntime.Must(admissionregistration.AddToScheme(scheme))
 }

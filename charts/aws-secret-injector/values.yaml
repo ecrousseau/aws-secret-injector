@@ -1,0 +1,18 @@
+# Default values for secrets-inject
+# This is a YAML formatted file
+# Declare variables to be passed into your templates
+
+replicaCount: 2
+createPodDisruptionBudget: true
+images:
+  admission_controller:
+    registry: ghcr.io
+    repository: ecrousseau/aws-secret-injector/admission-controller
+    tag: v1.5
+  init_container:
+    registry: ghcr.io
+    repository: ecrousseau/aws-secret-injector/init-container
+    tag: v1.5
+securityContext:
+  runAsUser: 1337
+  runAsGroup: 1337

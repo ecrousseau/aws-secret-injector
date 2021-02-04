@@ -1,0 +1,49 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app: aws-secret-injector
+  name: aws-secret-injector
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      app: aws-secret-injector
+  template:
+    metadata:
+      labels:
+        app: aws-secret-injector
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: {{ .Values.securityContext.runAsUser }}
+        runAsGroup: {{ .Values.securityContext.runAsGroup }}
+      volumes:
+      - name: certs
+        secret:
+          secretName: aws-secret-injector-tls
+      containers:
+      - name: admission-controller
+        image: {{ .Values.images.admission_controller.registry }}/{{ .Values.images.admission_controller.repository }}:{{ .Values.images.admission_controller.tag }}
+        volumeMounts:
+        - name: certs
+          mountPath: /tls
+          readOnly: true
+        args:
+        - --tls-cert-file=/tls/tls.crt
+        - --tls-private-key-file=/tls/tls.key
+        - --init-container-image={{ .Values.images.init_container.registry }}/{{ .Values.images.init_container.repository }}:{{ .Values.images.init_container.tag }}
+        ports:
+        - containerPort: 8443
+        imagePullPolicy: Always
+        securityContext:
+          privileged: false
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+        resources:
+          requests:
+            cpu: 100m
+            memory: 64Mi
+          limits:
+            cpu: 100m
+            memory: 256Mi

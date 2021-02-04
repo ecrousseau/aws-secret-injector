@@ -9,7 +9,7 @@ import (
     "github.com/aws/aws-sdk-go-v2/config"
     "github.com/aws/aws-sdk-go-v2/aws/arn"
     "github.com/aws/aws-sdk-go-v2/service/secretsmanager"
-    "k8s.io/klog"
+    "k8s.io/klog/v2"
     "encoding/json"
 )
 

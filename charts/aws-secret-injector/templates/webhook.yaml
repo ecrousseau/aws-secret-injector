@@ -1,6 +1,6 @@
 {{ $tls := fromYaml ( include "aws-secret-injector.gen-certs" . ) }}
 ---
-apiVersion: admissionregistration.k8s.io/v1beta1
+apiVersion: admissionregistration.k8s.io/v1
 kind: MutatingWebhookConfiguration
 metadata:
   name: aws-secret-injector
@@ -17,9 +17,20 @@ webhooks:
     apiGroups: [""]
     apiVersions: ["v1"]
     resources: ["pods"]
-  failurePolicy: Ignore
-  admissionReviewVersions: ["v1beta1"]
+  failurePolicy: Fail
+  sideEffects: None
+  admissionReviewVersions: ["v1"]
   timeoutSeconds: 5
+  namespaceSelector:
+    matchExpressions:
+    - key: secret-injection
+      operator: In
+      values: ["enabled"]
+  objectSelector:
+    matchExpressions:
+    - key: secret-injection
+      operator: NotIn
+      values: ["disabled"]
 ---
 apiVersion: v1
 kind: Secret

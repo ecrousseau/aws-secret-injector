@@ -5,11 +5,10 @@ import (
     "os"
     "strings"
     "strconv"
-    "github.com/aws/aws-sdk-go/aws"
-    "github.com/aws/aws-sdk-go/aws/arn"
-    "github.com/aws/aws-sdk-go/aws/session"
-    "github.com/aws/aws-sdk-go/aws/endpoints"
-    "github.com/aws/aws-sdk-go/service/secretsmanager"
+    "context"
+    "github.com/aws/aws-sdk-go-v2/config"
+    "github.com/aws/aws-sdk-go-v2/aws/arn"
+    "github.com/aws/aws-sdk-go-v2/service/secretsmanager"
     "k8s.io/klog/v2"
     "encoding/json"
 )
@@ -64,28 +63,11 @@ func main() {
         klog.Error("Unable to read environment variables SECRET_ARNS or SECRET_NAMES")
         os.Exit(3)
     }
-    stsRegionalEndpoint, _ := endpoints.GetSTSRegionalEndpoint("legacy")
-    if os.Getenv("AWS_STS_REGIONAL_ENDPOINTS") != "" {
-        parsedSTSRegionalEndpoint, err := endpoints.GetSTSRegionalEndpoint(os.Getenv("AWS_STS_REGIONAL_ENDPOINTS"))
-        if err != nil {
-            klog.Error("AWS_STS_REGIONAL_ENDPOINTS env var could not be parsed")
-            os.Exit(4)
-        }
-        stsRegionalEndpoint = parsedSTSRegionalEndpoint
-    }
-    awsSession, err := session.NewSessionWithOptions(session.Options{
-        Config: aws.Config{
-            CredentialsChainVerboseErrors: aws.Bool(true),
-            STSRegionalEndpoint: stsRegionalEndpoint,
-        },
-    })
-    if err != nil {
-        klog.Info("Error while creating AWS session: ", err)
-        os.Exit(5)
-    }
+
+    // process each secret
     for _, secret := range secrets {
         klog.Info("Processing: ", secret.Id)
-        err := WriteSecretValue(awsSession, secret)
+        err := WriteSecretValue(secret)
         if err != nil {
             klog.Info("Error while processing: ", secret.Id)
             os.Exit(6)
@@ -95,12 +77,16 @@ func main() {
 }
 
 // WriteSecretValue retrieves secrets from AWS Secrets Manager and writes the values to files.
-func WriteSecretValue(awsSession *session.Session, secret Secret) error {
-    svc := secretsmanager.New(awsSession, &aws.Config{Region: aws.String(secret.Region)})
-    input := &secretsmanager.GetSecretValueInput{
-        SecretId: aws.String(secret.Id),
+func WriteSecretValue(secret Secret) error {
+    ctx := context.TODO()
+    cfg, err := config.LoadDefaultConfig(ctx, config.WithRegion(secret.Region))
+    if err != nil {
+        klog.Info("Error while loading AWS configuration: ", err)
+        os.Exit(5)
     }
-    result, err := svc.GetSecretValue(input)
+    client := secretsmanager.NewFromConfig(cfg)
+    input := &secretsmanager.GetSecretValueInput{SecretId: &secret.Id}
+    result, err := client.GetSecretValue(ctx, input)
     if err != nil {
         klog.Error("Error while getting secret value: ", err)
         return err

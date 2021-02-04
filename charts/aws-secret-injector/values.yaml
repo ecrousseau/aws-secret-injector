@@ -8,11 +8,11 @@ images:
   admission_controller:
     registry: ghcr.io
     repository: ecrousseau/aws-secret-injector/admission-controller
-    tag: latest
+    tag: v1.5
   init_container:
     registry: ghcr.io
     repository: ecrousseau/aws-secret-injector/init-container
-    tag: latest
+    tag: v1.5
 securityContext:
   runAsUser: 1337
   runAsGroup: 1337

@@ -33,7 +33,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GHCR_TOKEN }} # GHCR token has 'write packages' permission
         with:
-          upload_url: ${{ github.event.release.id }}
+          upload_url: ${{ github.event.release.upload_url }}
           asset_path: aws-secret-injector-${{ github.event.release.tag_name }}.tgz
           asset_name: aws-secret-injector-${{ github.event.release.tag_name }}.tgz
           asset_content_type: application/x-gzip

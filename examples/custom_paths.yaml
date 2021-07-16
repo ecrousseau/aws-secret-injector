@@ -1,0 +1,42 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: secrets-testing
+  annotations:
+    eks.amazonaws.com/role-arn: arn:aws:iam::AWS_ACCOUNT_ID:role/IAM_ROLE_NAME
+---  
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app: secrets-testing
+  name: secrets-testing
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: secrets-testing
+  template:
+    metadata:
+      annotations:
+        secrets.aws.k8s/injectorWebhook: init-container
+        secrets.aws.k8s/region: AWS_REGION
+        secrets.aws.k8s/secretNames: SECRET_NAME_1,SECRET_NAME_2
+      labels:
+        app: secrets-testing
+    spec:
+      serviceAccountName: secrets-testing
+      volumes:
+      - name: secret-vol
+        emptyDir:
+          medium: Memory
+      containers:
+      - image: busybox
+        name: busybox
+        volumeMounts:
+        - name: secret-vol
+          mountPath: /custom-dir
+        - name: secret-vol
+          mountPath: /custom-file
+          subPath: SECRET_NAME_1
+        command: ['sh', '-c', 'echo $(ls /custom-dir/ && cat /custom-dir/* && cat /custom-file) && sleep 3600']
